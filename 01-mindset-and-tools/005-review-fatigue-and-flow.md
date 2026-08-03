@@ -1,0 +1,191 @@
+# 005. AI 写得比我读得快，我一天到晚在审代码——怎么把节奏和心流拿回来？
+
+> 难度：基础
+> 主题：心智与工具
+> 工具：Claude Code · 横向(Cursor / Copilot / Codex)
+> 题型：场景题
+
+## TL;DR
+
+累的根源不是"活变多了"，是**你的角色被换了**：从写代码的人变成全职审稿人，而审稿是持续高强度的理解工作，中间还被 agent 的等待时间反复打断。三件事能立刻缓解：
+
+1. **控制单次产出体积**：一次任务只让它改一件事、diff 控制在你一口气能读完的量（经验值 200~300 行以内）。用 plan mode 先审计划再审代码——计划错了改一段话，代码错了改一下午。
+2. **不要盯着进度条**：给 Claude Code 配 `Stop` / `Notification` hook，跑完响铃再回来。等待期做别的事，而不是干等着看它一行行输出。
+3. **把"审"变成"验"**：不要每行都读。先看它是否满足你事先写下的验收条件（测试、契约、边界），再挑关键路径读，其余抽查。全读是审不完的，也不该全读。
+
+如果这三条做完仍然每天被淹，那不是姿势问题，是**吞吐量设置得太高**——同时开三个 agent 却只有一个你，本来就是超载。
+
+## 为什么
+
+这个问题在社区被反复问，说明它不是个人状态问题。V2EX 上一句原话概括得最准：**"生成的速度上去了，但是我理解的节奏还是原来的节奏"**（1192730，130 回复，2026-02）。HN 上 "Vibe coding is mad depressing"（263 分 / 159 评论）里有条高赞说得更直接：
+
+> "since I didn't write the code, in order to understand it I have to read it. But gaining understanding that way takes longer than writing it myself does."
+
+（因为不是我写的，我得读一遍才懂；而这样建立理解比我自己写还慢。）
+
+背后是三个机制叠加：
+
+**一、写和读的成本不对称。** 自己写代码时，理解是在写的过程中顺带完成的——你做每个决定时就知道为什么。读别人的代码，理解要单独付一遍钱，而且是全额。AI 把"写"的时间压到接近零，但没有压缩"读"的时间，于是全部负载压到了理解这一端。
+
+**二、心流需要连续的操作反馈，agent 循环把它切碎了。** 心流的前提是"动作—反馈"闭环足够快且由你控制。等 agent 跑 2 分钟、读一屏输出、发现方向不对、重新提示——这是走走停停。HN "How do you get into a flow state when using AI to code?"（98 分 / 124 评论，2026-06）下有条评论形容为 "constant stop and go traffic, even with multiple agents"（哪怕开多个 agent，也还是走走停停的堵车）。
+
+**三、标准会自己往下滑。** 同一帖里有人描述过完整过程：一开始认真审，越审越累，于是"lower my standards"，最后完全不知道代码里有哪些决定，分支变得没法维护只能重来。这是本篇最需要防的结局——疲劳的终点不是慢，是**放弃把关**。
+
+所以目标不是"忍着把所有代码读完"，是**降低必须读的量、提高每次读的信噪比、并且把等待时间还给自己**。
+
+## 怎么做
+
+### 第 1 步：把单次任务切到"一口气能读完"
+
+不要给"实现整个登录模块"这种任务。拆成：加数据模型 → 加接口 → 加校验 → 加测试，一次一个，每次单独看 diff。
+
+判断做对了：`git diff --stat` 的总变更行数，是你能在 5~10 分钟内读完并说清"每处为什么改"的量。多数人这个值在 200~300 行。超了就是切得不够细。
+
+```bash
+git diff --stat            # 本次改了多少、碰了几个文件
+git diff -- src/auth.ts    # 只看关心的那个文件
+```
+
+如果一次任务碰了 10 个以上你没预期的文件，说明任务描述太模糊，回去重切，别硬审。
+
+### 第 2 步：先审计划，再审代码
+
+plan mode 下 Claude Code 只读文件、只出计划，不落盘：
+
+```bash
+claude --permission-mode plan
+```
+
+会话中途按 `Shift+Tab` 也能切，循环顺序是 `default` → `acceptEdits` → `plan`。开启后状态栏显示 `⏸ plan mode on`。（官方文档，2026-08 核对）
+
+判断做对了：计划里每个"有后果的决定"（改哪个表、动哪个公共函数、加什么依赖）都被明确写出来了，你能逐条点头或否掉。如果计划只写"重构认证模块"这种粒度，让它重写细一点再批。
+
+这一步的收益是算术级的：一段错的计划改一分钟，一份错的实现改一下午。
+
+### 第 3 步：跑起来就别盯着，让它响铃叫你
+
+给 `Stop`（回答完毕）和 `Notification`（需要你输入）事件挂通知。**注意时效**：从 v2.1.139 起 hook 进程没有控制终端，老教程里那种 `printf '\a' > /dev/tty` 的写法已经失效；现在要用 hook 输出的 `terminalSequence` 字段，由 Claude Code 自己写终端（需要 v2.1.141+）。
+
+`.claude/settings.json`：
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      { "hooks": [ { "type": "command", "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/notify.sh", "async": true } ] }
+    ],
+    "Notification": [
+      { "matcher": "idle_prompt|agent_needs_input",
+        "hooks": [ { "type": "command", "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/notify.sh", "async": true } ] }
+    ]
+  }
+}
+```
+
+`.claude/hooks/notify.sh`（记得 `chmod +x`）：
+
+```bash
+#!/bin/bash
+printf '{"terminalSequence":"\\u0007"}'
+```
+
+裸 BEL（响铃）在允许列表里，最省事。想要桌面通知横幅，把输出换成 OSC 9 或 OSC 777 序列（iTerm2 / Windows Terminal / WezTerm 认 OSC 9，Ghostty / Warp 认 OSC 777）。
+
+判断做对了：随便让它跑个任务，切到别的窗口，任务结束时终端响一声或弹出通知。没响先查三件事——脚本有没有执行权限、`claude --version` 是否 ≥ 2.1.141、终端本身是否关了响铃。
+
+> 时效声明：以上版本号与 `terminalSequence` 允许列表按 2026-08 官方 hooks 文档核对。这块行为改过一次（老的 `/dev/tty` 写法就是被这次改动废掉的），配之前建议再看一眼文档当前版本。
+
+### 第 4 步：用验收条件代替逐行阅读
+
+在让它写之前，先写下"怎么算做对"：哪几个测试要过、哪个接口签名不许变、哪些边界要处理。写完之后按这张单子核对，而不是从头读到尾。
+
+一个可复制的顺序：
+
+1. `git diff --stat` 看范围有没有超出预期，超了直接打回
+2. 跑测试与类型检查（`npm test`、`pytest`、`tsc --noEmit` 等，按项目来）
+3. 只精读关键路径：涉及钱、权限、数据写入、对外契约的部分
+4. 其余抽查：随机挑两三处，看它的实现理由是否站得住
+
+判断做对了：你能用两句话说清"这次改了什么、风险在哪"。说不清就是没审明白，别合。
+
+### 第 5 步：把吞吐量降到跟你匹配
+
+同时跑多个 agent 能提高机器的产出，但**审查带宽只有一个你**。多开的直接后果是排队等你审，队列越长越焦虑。
+
+真要并行，用官方 worktree 隔离，避免几个会话互改同一份工作区：
+
+```bash
+claude --worktree feature-auth      # 另开一个终端换个名字，就是一路独立会话
+```
+
+判断做对了：任何时刻"等你审的任务数"不超过 2。超过就停手，先清队列。这个数字比你以为的小得多。
+
+（并行到底该开几个，见 [#032 并行 agent 到底该开几个](../04-execution-workflow/032-subagent-when-and-how.md)。）
+
+### 第 6 步：给自己留一段不用 AI 的时间
+
+如果心流对你重要，就明确划出一段时间自己写——通常是那些你本来就想清楚了、写起来最快的部分。把 AI 用在你不想亲手做的部分（样板代码、测试脚手架、批量改名、查资料）。
+
+HN 那个帖子里，声称重新找回心流的人几乎都是这么做的：要么把心流转移到"规划"这一层（自己设计、AI 执行），要么保留一块自己动手的地盘。**没有人是靠"审得更快"找回心流的。**
+
+## Claude Code 实战
+
+一次典型的低疲劳循环，从头到尾：
+
+```bash
+# 1. 隔离工作区，跑起来不影响主分支
+claude --worktree fix-login-rate-limit
+
+# 2. 进去先规划不落盘
+claude --permission-mode plan
+```
+
+```text
+读一下 src/auth/ 和 tests/auth/，我要给登录接口加限流。
+先给计划：改哪些文件、限流放在哪一层、用什么存计数、失败返回什么。
+不要写代码。范围限制在 src/auth/ 下，不许动公共中间件。
+```
+
+批计划时重点看三处：范围有没有溢出、有没有偷偷引新依赖、失败路径写没写。批完再让它执行。
+
+执行完：
+
+```bash
+git diff --stat
+npm test
+git diff -- src/auth/rate-limit.ts    # 只精读核心那一个文件
+```
+
+几个降低疲劳的小配置：
+
+- `CLAUDE.md` 里写死约束，省得每次重复提醒："改动前先说计划""不许改测试来让测试通过""一次只做一件事"
+- 用 `/rewind` 或 `git checkout` 直接丢弃跑歪的结果，不要花力气去审一个已经方向错了的 diff——**审一份注定要扔的代码是纯亏**
+- 大范围探索交给 subagent：`用一个 subagent 调研我们的 token 刷新是怎么做的`，只把结论带回主上下文，你也少读一堆无关文件
+
+## 反模式
+
+- ❌ **把 AI 的输出当 PR 来读，一行行从头读到尾** —— 你的时间会被产出量线性吃掉，而产出量是它说了算的。要按风险分级读。
+- ❌ **累了就直接合，反正测试绿了** —— 这是社区里描述过的标准滑坡路径：降标准 → 不知道代码里有什么决定 → 最后整块重写。合之前至少能用两句话说清改了什么、风险在哪。
+- ❌ **开五个 agent 想提速** —— 瓶颈在你的审查带宽，不在生成速度。加生成端只会加长等你审的队列。
+- ❌ **盯着输出流看** —— 既进不了心流，也没在有效工作。挂通知，走开。
+- ❌ **计划都没看就让它写** —— 省下的两分钟，会在读错误实现时以小时计付回去。
+- ❌ **把"没有心流"当成自己的问题** —— HN 上三次被提出的同一个诉求，不是个人适应不良。它是工作方式变了的正常结果，要改的是流程，不是逼自己。
+
+## 延伸
+
+**交叉引用：**
+- [#003 为什么 AI 写的代码我审不动、改完自己看不懂](003-prompt-to-agentic-mindset-shift.md) —— 同一现象的另一半：这篇讲工作节奏，003 讲认知负担本身
+- [#041 AI 一次吐几百行 diff 我读不过来，怎么 review](../05-quality-assurance/041-how-to-review-ai-generated-code.md) —— 具体的 review 方法论
+- [#031 让 AI 改一个小功能，它却动了一堆无关文件（plan → execute → review 循环）](../04-execution-workflow/031-plan-execute-review-loop.md) —— 控制 diff 体积的完整循环
+- [#032 并行 agent 到底该开几个](../04-execution-workflow/032-subagent-when-and-how.md) —— 吞吐量该设多大
+- [#004 CLAUDE.md、skill、subagent、hooks、plan mode 该用哪个](004-claude-code-capabilities-map.md) —— 本篇用到的几个机制的全景
+
+**参考资料：**
+- [Vibe coding is mad depressing (HN)](https://news.ycombinator.com/item?id=46227422) — 263 分 / 159 评论，"读懂它写的比自己写还慢"的原始讨论（社区，2026-01）
+- [Ask HN: How do you get into a flow state when using AI to code?](https://news.ycombinator.com/item?id=48492118) — 98 分 / 124 评论，找回心流的几种做法与"走走停停"的形容（社区，2026-06）
+- [AI 编程后，我更累了 (V2EX)](https://v2ex.com/t/1192730) — 130 回复，"生成速度上去了，理解节奏还是原来的节奏"（社区，2026-02）
+- [Ask HN 早期同题讨论](https://news.ycombinator.com/item?id=44811457) — 58 分 / 53 评论，同一诉求更早的一次（社区，2025）
+- [Claude Code · Common workflows](https://code.claude.com/docs/en/common-workflows) — plan mode（`--permission-mode plan` / `Shift+Tab`）、`claude --worktree`、subagent 委派的官方写法（官方，2026-08 核对）
+- [Claude Code · Hooks reference](https://code.claude.com/docs/en/hooks) — `Stop` / `Notification` 事件、`terminalSequence` 字段与允许的转义序列、版本要求（官方，2026-08 核对）
+
+> 本篇个人实践（L4）：`[待补：BOSS 的实战经验/踩坑]`

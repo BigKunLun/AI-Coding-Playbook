@@ -1,0 +1,389 @@
+# 042. AI 写的方法不存在、pip install 报 404、API 参数对不上——幻觉 API 和幻觉依赖怎么查、怎么防？
+
+> 难度：中级
+> 主题：质量保证
+> 工具：Claude Code · 横向(Cursor / Copilot / …)
+> 题型：排错题
+
+> ⏰ 时效声明：本文命令与工具行为于 **2026-08-03** 实测复核。核到的事实：
+>
+> - Context7 MCP 现行工具名为 `resolve-library-id` + `query-docs`（对照官方 README；旧名 `get-library-docs` 已更名）。MCP 工具名是本文最易变的一类信息，照抄报 `tool not found` 时的兜底做法见「④ 官方文档交叉核对」。
+> - `import/no-unresolved`（eslint-plugin-import）能挡 import 了不存在的包；**Ruff 没有等效规则**，Python 这层要靠 pyright 的 `reportMissingImports`（默认 `"error"`）或 mypy。详见「② lint 这一层挡不住什么」。
+> - `pip index versions` 的 experimental 警告已在 **pip 25.1（2025-04-26）** 移除（pip NEWS：Remove `experimental` warning from `pip index versions` command，#13188）；本机 pip 26.1.2 实测确实不再打印。但它把结果打到 **stderr**（`| grep` 抓不到，要先 `2>&1`），而且只告诉你"有没有可安装的版本"，看不到首次发布时间和下载量——查 slopsquatting 要的是后者，所以本文把 registry HTTP 查询作为第一手段。
+>
+> 「幻觉类型 × 查防手段」矩阵不依赖具体版本，长期有效。
+
+## TL;DR
+
+AI 编出来的 API 和依赖有个危险的特点：它语法正确、命名合理、甚至带注释，看起来比真 API 还像真 API。
+
+正因如此，凭人脑记忆判断"这个 API 存不存在"极不可靠。QA 厂商 shiftasia 把话说死："You will not catch this by reading; you need to check it against your actual dependency manifest"（光读代码抓不到，必须拿它跟你实际的依赖清单去比对）。
+
+> —— [shiftasia](https://shiftasia.com/column/how-to-review-ai-generated-code-the-complete-developers-guide/)（社区/QA 厂商，2026）
+
+但幻觉也有个好抓的地方：它会在编译或运行时暴露。官方文档给了一条规律："Give Claude something that produces a **pass or fail**, and the loop closes on its own"（给 Claude 一个能产出"通过或失败"的东西，循环就会自己收敛）。
+
+> —— [CC Docs: best-practices](https://code.claude.com/docs/en/best-practices)（官方，2026-06）✅
+
+跑一次 build、import 或 install，幻觉 API 就会现形：要么 ImportError，要么编译报错，要么安装 404。
+
+本篇给一套"幻觉类型 × 查防手段"的工具箱。先把幻觉拆成两类：
+
+- **幻觉包**（AI 让你安装的依赖根本不存在）：症状是 `pip install` / `npm install` 报 404。
+- **幻觉 API**（包是真的，但方法名、参数、签名或版本是错的）：症状是 `AttributeError` / `TypeError: unexpected keyword argument` / TS 编译报 "Property does not exist"。
+
+每一类都配上多种手段来挡：类型系统、lint、依赖锁、官方文档交叉核对、运行验证、机审。
+
+四点速记：
+
+1. **幻觉是规模化、可预测、有安全后果的现象，不是个例。** 一项学术研究测了 16 个主流代码 LLM、生成 576,000 个代码样本，结论是推荐的包里有 19.7% 是幻觉（不存在）。**但这 19.7% 是把大量开源模型样本混进来的均值**：论文摘要给的分档是商业模型至少 5.2%、开源模型至少 21.7%——你用 Claude / GPT，对标的是 5.2% 那档，别拿 19.7% 吓自己，也别因为"我用的是好模型"就不查。另一个数字是 58% 的幻觉包会重复出现——重复就意味着攻击者能预测性地抢注这些包名来投毒（[arXiv:2406.10279](https://arxiv.org/abs/2406.10279)，学术）。
+2. **AI 为什么会编，用"西瓜树"能解释。** AI 并不知道有哪些 API，它只是根据 prompt 和上下文，接上概率最高的 token，于是语法通顺但事实错误（[V2EX 1172660 @liyafe1997](https://www.v2ex.com/t/1172660)，社区）。
+3. **幻觉会现形。** 给 agent 一个 build / test / import 当作"通过或失败"的信号，幻觉会在这一步暴露（[CC Docs: best-practices](https://code.claude.com/docs/en/best-practices)）✅。
+4. **查防分两条轴。** 幻觉包靠 registry 查询加 lockfile 挡（SCA 挡不住，见下文）；幻觉 API 靠类型检查、官方文档核对、跑一次挡；机审加 Context7 查官方文档兜底所有类型。
+
+一句话切边界：本篇只讲幻觉这一类错的查防手法。验证体系全景见 [#040](./040-who-verifies-ai-code-and-how.md)，人审工作流见 [#041](./041-how-to-review-ai-generated-code.md)，跑测试挡幻觉的 TDD 手法归 [#030](../04-execution-workflow/030-tdd-in-ai-coding.md)，改不对何时停手见 [#043](./043-fix-loop-when-to-stop-debugging.md)。
+
+---
+
+## 为什么
+
+### 1. 承接 040 / 041，进入幻觉专项
+
+[#040](./040-who-verifies-ai-code-and-how.md) 把幻觉归为"约束层（类型 / lint / schema）能挡的一类错"，[#041](./041-how-to-review-ai-generated-code.md) 把"新 API / 新依赖"列为人审自查的关注点之一。
+
+但当 AI 真给你递来一段代码，里面调用了 `GetUserAgeFromDB()`，或者让你 `pip install langchain-openai-agent`，上面那两句指针就不够用了。
+
+你不知道这个 API 或包到底存不存在，也不知道除了"凭记忆判断"之外还有什么系统方法能查。本篇要补的就是这块：把幻觉这一类错的查防手法讲透。至于 040 的体系框架、041 的人审工作流，本篇不重复。
+
+### 2. 幻觉是规模化、可预测、有安全后果的现象
+
+有学术数据可以佐证。UT San Antonio、Virginia Tech、Oklahoma 三校联合研究（论文题为「We Have a Package for You!」，arXiv:2406.10279），用 16 个主流代码 LLM 生成了 576,000 个代码样本，涵盖 Python 和 JavaScript 两种语言。
+
+第一个关键数字是整体幻觉率：
+
+> "These 30 tests generated a total of 2.23 million packages in response to our prompts, of which **440,445 (19.7%)** were determined to be hallucinations, including 205,474 unique non-existent packages…"
+>
+> —— [arXiv:2406.10279 §5.1](https://arxiv.org/abs/2406.10279)（学术，2024）✅
+
+也就是说，在 223 万个被推荐的包里，19.7% 是幻觉。论文摘要还给了分类下界：商业模型至少 5.2%，开源模型至少 21.7%。
+
+第二个关键数字是重复率：
+
+> "**58% of the time, a hallucinated package is repeated more than once in 10 iterations**… a persistent hallucination is more valuable for malicious actors looking to exploit this vulnerability."
+>
+> —— [arXiv:2406.10279 §5.3](https://arxiv.org/abs/2406.10279)（学术，2024）✅
+
+这句要读准：58% 指的是"同一个 prompt 跑 10 次，同一个幻觉包重复出现超过一次"，不是跨模型重复。论文 §5.4 另有一个数字：在所有生成的包名里（真包和幻觉都算），约 81% 是单个模型独有的，幻觉包的独有比例更高，随模型数量增加近乎指数衰减。换句话说，换模型或跨模型也能撞出另一批幻觉。
+
+重复率高，才是危险所在。因为幻觉包可预测，攻击者就能提前把这些不存在的包名注册到公共仓库里。这让幻觉不只是"跑不通"，而是一条供应链攻击向量。
+
+安全厂商 Endor Labs 给了这条攻击向量的名字和机制（注：Endor Labs 卖 SCA 供应链扫描工具，有商业立场）：
+
+> "**Hallucinated dependencies** occur when an AI model suggests importing or installing a package that **doesn't actually exist**."
+> "This creates a dangerous opportunity for attackers, who can **register the unused package name** in public repositories and fill it with malicious code (so called '**slopsquatting**')."
+>
+> —— [Endor Labs](https://www.endorlabs.com/learn/the-most-common-security-vulnerabilities-in-ai-generated-code)（安全厂商，标商业立场）
+
+这里的 slopsquatting，指的就是攻击者抢注 AI 幻觉出的包名、往里塞恶意代码。
+
+宏观背景是：开发者对 AI 输出准确性的信任正在下降。Stack Overflow 2025 开发者调查显示，主动不信任 AI 工具准确性的人（46%）比信任的人（33%）还多（[Stack Overflow Developer Survey 2025: AI](https://survey.stackoverflow.co/2025/ai)，官方调查，2025）✅。幻觉是信任下降的原因之一。
+
+### 3. AI 为什么会编——"西瓜树"根因
+
+V2EX 用户 liyafe1997 的"西瓜树"比喻，最能说清根因。AI 的本质是"吐出下一个概率最高的 token"。当相关训练数据缺失时，概率最大的那个 token 可能就是错误信息，也就是编出来的 API：
+
+> "你知道西瓜是水果，然后呢水果一般都是长在树上的（「果」这个 token 后面经常跟着「树」）……于是你写下了「西瓜树」，幻觉就这么来了。尽管「西瓜树」是错的，但是你也不会写下「西瓜人」，「树」比「人」概率更大。"
+>
+> —— [V2EX 1172660 @liyafe1997](https://www.v2ex.com/t/1172660)（社区，2025-11）✅
+
+那为什么幻觉代码"语法几乎不出错"、但"API 却凭空编"？同一帖子解释：语法 token 有大量训练数据保障，而具体 API 的 token 在数据缺失时就塌成了幻觉。原文说，从语法层面你不大可能犯错，哪怕你并不懂主谓宾定状补这些语法规则（[@liyafe1997](https://www.v2ex.com/t/1172660)）✅。
+
+还有一层结构性根因，来自训练激励本身。code review 厂商 diffray 的说法是（注：diffray 卖多 agent 验证工具，有商业立场）：
+
+> "LLMs hallucinate because they're optimized to be **confident test-takers, not careful reasoners**… when incorrect statements cannot be distinguished from facts during evaluation, models learn that **confident guessing outperforms acknowledging uncertainty**."
+>
+> —— [diffray](https://diffray.ai/blog/llm-hallucinations-code-review/)（code review 厂商，标商业立场）
+
+意思是：模型被训练成"自信的考生"而非"谨慎的推理者"。当评测无法区分错误陈述和事实时，模型学到的是自信地猜比承认不确定更划算。
+
+shiftasia 补了一句（注：QA 外包公司，有商业立场）：LLM 是从训练数据里预测 token，而不是真"理解"上下文，它擅长模式、但会在具体细节上产生幻觉（[shiftasia](https://shiftasia.com/column/how-to-review-ai-generated-code-the-complete-developers-guide/)，QA 厂商）。
+
+**结论**：幻觉不是 AI"偶尔犯错"，而是 token 概率加训练激励的结构性产物。所以不能靠"AI 应该知道"来防，必须靠外部真值源来查——类型定义、依赖清单、官方文档、实际运行。
+
+---
+
+## 怎么做
+
+本篇的核心交付有两件：一张"幻觉类型 × 查防手段"矩阵，加上每种手段的幻觉专项配置。
+
+### 第一交付物：幻觉类型 × 查防手段矩阵
+
+按两条主轴来切：横向是幻觉类型（幻觉包 / 幻觉 API），纵向是查防手段（类型系统 / lint / 依赖锁 / 官方文档交叉核对 / 运行验证 / 机审）。一张表，每一格给出"挡什么、怎么配"。
+
+| 手段 \ 类型 | **幻觉包**（不存在的依赖） | **幻觉 API**（方法名 / 参数 / 签名 / 版本错） |
+|------|------|------|
+| **类型系统**（约束层） | pyright `reportMissingImports`（默认 `"error"`）、mypy（报 `Cannot find implementation or library stub for module named "x"`）、TS 在 import 阶段就挡 | TS `strict` / mypy / pyright 挡方法名或参数类型错（shiftasia 所说「Method calls on objects that the library's type definitions do not expose」） |
+| **lint**（约束层） | **只有 JS 侧有**：eslint `import/no-unresolved` + `import/no-extraneous-dependencies`。Python 侧 Ruff 没有等效规则，这一格靠上一行的类型检查器 | 挡不住通用情况。只有针对特定库的规则集（Ruff 的 `NPY001`/`NPY201` 管 NumPy、`AIR301` 管 Airflow）能挡该库的废弃 API，其余靠类型系统和跑一次 |
+| **依赖锁 lockfile** | `package-lock.json` / `uv.lock` / `poetry.lock`（带 hash）把"装什么"钉死：AI 新加的包不在 lock 里就装不进来，`npm ci` 会直接失败 | lockfile 钉住的是**版本漂移**，不是"新版本"。它保证你运行时的库版本和你核对文档时的版本是同一个，避免"文档查的 2.x、装上的是 3.x"；至于 AI 拿旧记忆写新版 API，靠的是按 lock 里的版本号去查文档（见下一行） |
+| **官方文档交叉核对（RAG）** | Context7 `resolve-library-id` + `query-docs`（2026-08 的工具名，会变，报错时用 `/mcp` 查实际名）查"这个包在官方 registry 存在吗、当前版本 API 是什么" | Context7 查"这个 API 在当前版本的签名和参数是什么"（对应 diffray 所说「RAG 60-80% Hallucination Reduction」的落地） |
+| **运行验证** | `pip install` / `npm install` 跑一次——幻觉包会 404，或装进投毒包（slopsquatting） | `import` / build / 跑涉及该 API 的测试——幻觉 API 会 ImportError 或编译报错（官方的 pass/fail 信号） |
+| **机审** | REVIEW.md 的「Repo-specific checks」（如 "new deps must be in lockfile"），加一步 verification 过滤误报 | REVIEW.md 的「Verification bar」（行为断言需带 `file:line` 引用，逼机审去查文档，不靠命名推断） |
+
+这里有一条纪律要说清。上表每一格只给"挡什么、怎么配"，每种手段的完整攻略归到对应篇：类型系统的体系定位见 [#040](./040-who-verifies-ai-code-and-how.md)，运行验证归 [#030](../04-execution-workflow/030-tdd-in-ai-coding.md)，REVIEW.md 通用模板归 [#041](./041-how-to-review-ai-generated-code.md)。本篇的任务是帮你对号入座——遇到某个幻觉，该用哪个手段查——并给出每种手段的幻觉专项配置。
+
+### 第二交付物：每种手段的幻觉专项配置
+
+**① 类型系统挡幻觉**（属于约束层，是 [#040](./040-who-verifies-ai-code-and-how.md) 的展开）
+
+- TypeScript 开 `strict: true` 加 `noUncheckedIndexedAccess`，挡方法名和参数类型错。
+- Python 用 `mypy --strict` 或 `pyright`，挡方法签名错。
+- HTTP API 幻觉（AI 编的 endpoint 或字段）用 OpenAPI schema 校验挡：用 `openapi-typescript` 从 spec 生成类型。
+- 一句指针 040：在 JS / Python 这类弱约束语言里放手让 LLM 写，一旦不设约束就会"everything goes off the rails"（全线失控）（[HN @waterTanuki](https://news.ycombinator.com/item?id=47234917)，社区，2026-02）。约束层的体系定位归 040。
+
+**② lint 这一层能挡什么、挡不住什么**
+
+先说结论：**lint 只在 JS/TS 侧能挡幻觉包，Python 侧挡不住**，别指望 Ruff。
+
+JS/TS 侧，`import/no-unresolved` 的作用是"确认 import 的模块能在本地文件系统上被解析出来"（官方原文：ensures an imported module can be resolved to a module on the local filesystem）。AI 编出来的包没装、也解析不出来，所以这条能报。最小 flat config：
+
+```js
+// eslint.config.js
+import importPlugin from 'eslint-plugin-import';
+
+export default [
+  {
+    plugins: { import: importPlugin },
+    rules: {
+      // 挡"import 了根本不存在 / 没装的包"
+      'import/no-unresolved': 'error',
+      // 挡"import 了没写进 package.json 的包"
+      'import/no-extraneous-dependencies': 'error',
+    },
+  },
+];
+```
+
+怎么判断做对了（自测一次，别默认它生效）：
+
+```bash
+printf "import x from 'totally-not-a-real-pkg-42';\nconsole.log(x);\n" > /tmp/halluc.js
+npx eslint /tmp/halluc.js
+```
+
+预期输出里应出现：
+
+```
+error  Unable to resolve path to module 'totally-not-a-real-pkg-42'  import/no-unresolved
+```
+
+**如果这行没出现，说明规则没生效**（最常见原因是 eslint 没匹配到这个文件，或 resolver 没配好），此时你以为的这道闸是空的。
+
+Python 侧要直说：**Ruff 没有 `import/no-unresolved` 的等效规则**，它的 import 类规则管的是排序、未使用、位置，不做模块解析（2026-08 查 Ruff 规则表）。常被拿来凑数的 `F401` 是 "unused-import"，查的是"导入了但没用到"——AI 编的包只要在代码里被调用了，F401 就一声不吭，挡不住任何幻觉。Ruff 也没有通用的 deprecation 规则集，只有针对具体库的（`NPY001`/`NPY201` 管 NumPy，`AIR301`/`AIR302` 管 Airflow）。
+
+所以 Python 这层交给类型检查器：
+
+```toml
+# pyproject.toml
+[tool.pyright]
+reportMissingImports = "error"   # pyright 默认就是 "error"，显式写死防被人调低
+```
+
+自测要在**能读到这份 `pyproject.toml` 的目录里**跑，否则你测的只是 pyright 的默认值，证明不了"我这份配置生效了"。pyright 认 `--project <目录>`：先找该目录下的 `pyrightconfig.json`，找不到再读同目录的 `pyproject.toml` 的 `[tool.pyright]`。
+
+```bash
+mkdir -p /tmp/hallucdemo
+printf '[tool.pyright]\nreportMissingImports = "error"\n' > /tmp/hallucdemo/pyproject.toml
+printf 'import totally_not_a_real_pkg_42\nprint(totally_not_a_real_pkg_42)\n' > /tmp/hallucdemo/halluc.py
+npx -y pyright --project /tmp/hallucdemo     # 或 uvx pyright --project /tmp/hallucdemo
+```
+
+2026-08 实测输出（pyright 1.1.411）：
+
+```
+/tmp/hallucdemo/halluc.py
+  /tmp/hallucdemo/halluc.py:1:8 - error: Import "totally_not_a_real_pkg_42" could not be resolved (reportMissingImports)
+1 error, 0 warnings, 0 informations
+```
+
+退出码为 1（`npx -y pyright --project /tmp/hallucdemo >/dev/null 2>&1; echo $?`）。
+
+再确认配置文件真的被读到了，加 `--verbose`，输出里应有这两行（第一行是说没有 `pyrightconfig.json`，属正常）：
+
+```
+Configuration file not found at /tmp/hallucdemo.
+Loading pyproject.toml file at /tmp/hallucdemo/pyproject.toml
+```
+
+想彻底证明这条设置在起作用，把 `pyproject.toml` 里的值临时改成 `reportMissingImports = "none"` 再跑一次——输出应变成 `0 errors, 0 warnings, 0 informations`（实测如此）。能一开一关，说明这份配置确实生效，而不是撞上了默认值。测完记得改回 `"error"`。
+
+用 mypy 的话，对应报错是 `Cannot find implementation or library stub for module named "totally_not_a_real_pkg_42"`（mypy 官方文档 running_mypy 原文）。**注意：如果你的配置里开了 `ignore_missing_imports = True`（很多老项目为了消噪都开了），这条会被整个吞掉，幻觉包就静默通过了**——用 mypy 挡幻觉前先确认这个开关是关的。
+
+**③ 装之前先查 registry：判存在性 + 判抢注**
+
+- 用 lockfile 把"装什么"钉死并带 hash（`package-lock.json` / `uv.lock` / `poetry.lock`，或 `pip-compile --generate-hashes` 生成的 `requirements.txt`）。作用是：AI 加的新包不进 lock 就装不进 CI，逼它走一次人工过目。
+- **判存在性用 registry 的 HTTP 状态码，不用 `pip index`。** 下面两条 2026-08 实测：
+
+```bash
+# PyPI：404 = 不存在（幻觉包），200 = 存在
+curl -s -o /dev/null -w "%{http_code}\n" https://pypi.org/pypi/<pkg>/json
+# npm：同理
+curl -s -o /dev/null -w "%{http_code}\n" https://registry.npmjs.org/<pkg>
+```
+
+实测结果：`langchain-openai-agent` → `404`；`langchain-openai` → `200`。用 `npm view <pkg> version` 也行，不存在时报 `npm error code E404` 且退出码非 0；`pip index versions <pkg>` 对不存在的包报 `ERROR: No matching distribution found for <pkg>`、退出码 1，但输出走 stderr，管道里要写 `2>&1`。
+
+- **光有"存在"还不够——被抢注的包也是 200。** 论文那个 58% 重复率意味着幻觉包名可以被预测性抢注（slopsquatting），所以对 AI 推荐的每个新包，还要看首次发布时间和下载量：
+
+```bash
+# PyPI：首次发布时间 + 最新版本
+curl -s https://pypi.org/pypi/<pkg>/json | python3 -c "import json,sys;d=json.load(sys.stdin);r=d['releases'];t=sorted(f['upload_time'] for v in r.values() for f in v);print('首次发布:', t[0] if t else '无文件');print('最新版本:', d['info']['version'])"
+# PyPI 近期下载量
+curl -s https://pypistats.org/api/packages/<pkg>/recent
+# npm：创建时间 + 最新版 + 周下载量
+npm view <pkg> time.created dist-tags.latest
+curl -s https://api.npmjs.org/downloads/point/last-week/<pkg>
+```
+
+2026-08 跑 `langchain-openai` 的实际输出，可以当"正常包长什么样"的对照：
+
+```
+首次发布: 2024-01-05T23:12:33
+最新版本: 1.4.1
+{"data":{"last_day":1403333,"last_month":65421713,"last_week":16037434},...}
+```
+
+**怎么判断"注册时间异常"**：包存在（200），但首次发布在最近几周内、下载量只有几十到几百、版本只有 0.0.1 一个、GitHub 仓库空或不存在——这几条同时出现，就当成疑似抢注包处理，别装。反过来，几年历史 + 周下载量六位数以上，基本可以排除 slopsquatting（不排除该包本身有 CVE，那是下一条的事）。
+
+- **SCA 工具（`npm audit` / `pip-audit` / Snyk）在这里帮不上忙，要说清楚。** 它们的输入是**已经声明或已经装上**的依赖树，比对的是已知漏洞库：pip-audit 官方自述是"scanning Python environments for packages with known vulnerabilities"。也就是说：
+  - AI 只是在**源码片段**里写了一行 `import fake_pkg`，还没加进 `pyproject.toml` / `package.json` —— SCA 根本看不到它，不会报任何东西。
+  - 幻觉包**不存在**，自然也不在漏洞库里 —— SCA 依旧沉默。
+  - 抢注包是**新注册**的，还没被收录成 CVE —— SCA 大概率仍旧沉默。
+  
+  SCA 该管的是"你已经装了的这堆真包里有没有已知漏洞"。把它当幻觉闸门用，是这一层最容易犯的错。挡源码里那行 import 的，是上面的 `import/no-unresolved` / pyright；挡"装进来"的，是 lockfile + registry 查询。
+
+**④ 官方文档交叉核对（Context7 就是 RAG 落地）**
+
+- 让 agent 用 Context7 MCP：先 `resolve-library-id` 查包名，再 `query-docs` 查"这个 API 在当前版本的签名是什么"。这一步把幻觉从"概率脑补"变成"检索核对"，对应 diffray 所说的 RAG 降幻觉 60-80%。
+- **工具名会变，先兜底。** `resolve-library-id` + `query-docs` 是 2026-08 对照 Context7 官方 README 核到的名字（更早叫 `get-library-docs`）。如果 agent 报 `tool not found` 或类似错误，在 Claude Code 里跑 `/mcp` 列出当前已连接的 server 和它实际暴露的工具名，按实际名字改口，别照着本文硬试。
+- 查文档时**带上 lockfile 里的版本号**问（"在 langchain-openai 1.4.1 里，ChatOpenAI 的构造参数有哪些"），否则检索回来的可能是另一个大版本的文档，等于换了个来源继续幻觉。
+- 人审扫到新 API 时，去官方文档核对签名、参数、版本，而不是查 AI 的记忆。
+- shiftasia 的铁律："Do not trust your memory of the API; check the documentation for that specific version"（别信你对 API 的记忆，去查那个具体版本的文档）（[shiftasia](https://shiftasia.com/column/how-to-review-ai-generated-code-the-complete-developers-guide/)）。原因是 AI 训练数据里混着多个版本，可能用错版本的 API。
+
+**⑤ 运行验证挡幻觉**（手段归 [#030](../04-execution-workflow/030-tdd-in-ai-coding.md)）
+
+- 跑 `build` / `import` / `npm install` / `pip install`，幻觉会现形：ImportError、404 或编译报错。
+- 官方铁律："Give Claude something that produces a pass or fail, and the loop closes on its own"（[CC Docs: best-practices](https://code.claude.com/docs/en/best-practices)）✅。给 agent 一个 build 当终止条件，幻觉 API 会让它变红。
+- obra 的原则："NO COMPLETION CLAIMS WITHOUT FRESH VERIFICATION EVIDENCE"（没有新鲜的验证证据，就不许声称完成）（[obra](https://github.com/obra/superpowers/blob/main/skills/verification-before-completion/SKILL.md)，社区权威）。agent 说"我用了某某 API"时，要它贴出 import 或 build 的输出。
+- 一句指针 030：跑测试或 import 挡幻觉，是 TDD 运行验证的一环，本篇不展开 TDD 攻略。
+
+**⑥ 机审挡幻觉**（REVIEW.md 的 verification bar，是 [#041](./041-how-to-review-ai-generated-code.md) 的展开）
+
+- REVIEW.md 的「Verification bar」：要求机审的每条发现都带 `file:line` 引用，逼 reviewer 去依赖清单或文档核对，不靠命名推断。官方原文："'behavior claims need a `file:line` citation in the source, not an inference from naming' cuts false positives that would otherwise cost the author a round trip"（[CC Docs: code-review](https://code.claude.com/docs/en/code-review)，官方，2026-06）✅。
+- REVIEW.md 的「Repo-specific checks」：加上 "new API routes must have an integration test" 或 "new deps must be in lockfile" 这类仓库专属规则（官方原文同上）。
+- 机审的 verification 步骤本身就是挡幻觉的一层。官方说："a verification step checks candidates against actual code behavior to **filter out false positives**"（用一个验证步骤拿候选发现去比对实际代码行为，过滤误报）（[CC Docs: code-review](https://code.claude.com/docs/en/code-review)）✅。
+- 一句指针 041：REVIEW.md 的七个通用 pattern 模板归 [#041](./041-how-to-review-ai-generated-code.md)，本篇只展开 verification bar 和 repo-specific checks 这两条怎么挡幻觉。
+
+> **补充：幻觉"相对易检测"的特性**（注：社区单源，标存疑）
+>
+> 有一个 HN 帖标题是「Hallucinations in code are the least dangerous form of LLM mistakes」（代码里的幻觉是 LLM 错误里最不危险的一种）（[HN 43233903](https://news.ycombinator.com/item?id=43233903)，社区，2025-03）。它的论点方向是：代码幻觉会在编译或运行时现形（编译错、ImportError、运行异常），这一点区别于会静默通过的逻辑错和安全漏洞。
+>
+> 该帖讨论的原文是 Simon Willison 同名博文（2025-03），原话逐字："The moment you run LLM generated code, any hallucinated methods will be instantly obvious: you'll get an error."（你一运行 LLM 生成的代码，任何幻觉方法立刻现形，你会拿到一个报错）。评论区 jchw 等人以引用块转贴了这句，已逐字核到。
+>
+> 这与官方的"pass or fail"互相印证：跑一次 build 就能让幻觉 API 现形。这也是幻觉能被系统性查防的基础。
+
+---
+
+## Claude Code 实战
+
+### 导览：查一段 AI 生成代码里的幻觉
+
+**任务**：agent 生成了一个 Python 函数，里面调用了 `GetUserAgeFromDB()`，还让你 `pip install langchain-openai-agent`。怎么系统性地查这段代码里的幻觉？
+
+| 步骤 | 命令 | 预期输出 / 怎么判读 |
+|----|------|--------|
+| 1 | `npx pyright src/` | 幻觉包那行报 `error: Import "langchain_openai_agent" could not be resolved (reportMissingImports)`，退出码非 0；`GetUserAgeFromDB` 报 `"GetUserAgeFromDB" is not a known attribute of module`。两类幻觉在这一步就能分开 |
+| 2 | `curl -s -o /dev/null -w "%{http_code}\n" https://pypi.org/pypi/langchain-openai-agent/json` | 实测返回 `404` → 包不存在，幻觉包坐实。**若返回 `200`，不要松口**，接着跑第 2b 步 |
+| 2b | `curl -s https://pypi.org/pypi/<pkg>/json \| python3 -c "…"`（脚本见「怎么做」③） | 看首次发布时间和下载量。首发在几周内 + 周下载量三位数以内 + 只有 0.0.1 一个版本 → 疑似 slopsquatting 抢注，别装 |
+| 3 | Context7：`resolve-library-id` → `query-docs` | 确认真实包名是 `langchain` / `langchain-openai`，`-agent` 后缀是编的。报 `tool not found` 就先跑 `/mcp` 看实际工具名 |
+| 4 | `pip install langchain-openai-agent` | 报 `ERROR: Could not find a version that satisfies the requirement …` / `No matching distribution found`，退出码非 0——这就是官方说的 pass/fail 信号 |
+| 5 | `/code-review` | 配了 verification bar 后，发现里应带 `file:line` 或官方文档 URL。**若某条发现只写"这个 API 看起来不存在"而没有引用，就是靠命名推断，退回重查** |
+
+这套流程和 [#040](./040-who-verifies-ai-code-and-how.md)（怎么叠加几层验证）、[#041](./041-how-to-review-ai-generated-code.md)（怎么走完四段 review）的区别在于：本篇只演示"幻觉这一类错怎么查"，不重述验证体系的组合决策，也不重述人审四段工作流。
+
+### REVIEW.md 幻觉专项片段（可直接抄）
+
+下面是 [#041](./041-how-to-review-ai-generated-code.md) REVIEW.md 七个 pattern 模板里两条（Verification bar 和 Repo-specific checks）的幻觉专项写法。完整模板见 041。
+
+```markdown
+## Verification bar (hallucination-specific)
+- Any claim that an API exists must cite the official documentation
+  URL or the local type definition `file:line`, not an inference from
+  the function name.
+- Any new dependency must appear in the lockfile; if it does not,
+  flag it as Important and require manual registry verification
+  before install.
+
+## Always check (hallucination-specific)
+- New imports cross-referenced against the manifest (no packages
+  that are not in the lockfile)
+- Method calls exist in the library's type definitions for the
+  pinned version
+- External API calls match the current OpenAPI spec
+```
+
+---
+
+## 横向对比
+
+本篇不做工具横向大表（那归 [#001](../01-mindset-and-tools/001-claude-code-vs-chatgpt-cursor-copilot.md)），只回答一个问题：别的工具有没有挡幻觉的对应物？
+
+答案是：Cursor 和 Copilot 同样会幻觉（arXiv 研究测的 16 个 LLM 都会）。类型检查器、`import/no-unresolved`、registry 存在性查询这几层跟你用哪个 AI 工具无关，配一次全都受益。Context7（官方文档检索，也就是 RAG 落地）是 Claude Code 生态特有的查防手段。详细的工具生态对比不在本篇范围。
+
+---
+
+## 反模式（幻觉查防的误用）
+
+- ❌ **凭人脑记忆判断"这个 API 存不存在"。** shiftasia 说得直白：光读代码抓不到（"You will not catch this by reading"），也别信你对 API 的记忆（"Do not trust your memory of the API"）。要用类型系统、依赖清单、官方文档来核对。
+- ❌ **只查语法、不查存在性。** 幻觉 API 语法是正确的（V2EX 西瓜树），静态分析和编译可能都过，得在运行时或涉及该 API 的代码路径里才现形。shiftasia 原文说 "The failure only appears at runtime…"，后面接着 "in a code path that automated tests may not exercise"（失败只在运行时、而且是自动化测试可能没覆盖到的路径里才出现）。
+- ❌ **以为 `npm audit` / `pip-audit` / Snyk 能挡幻觉包。** 它们扫的是已经声明或已经装上的依赖树里的**已知漏洞**。源码里那行 `import fake_pkg` 还没进 manifest，它们看不到；包不存在或刚被抢注，漏洞库里也没有记录。挡这行 import 的是 `import/no-unresolved` / pyright，挡"装进来"的是 lockfile + registry 查询。
+- ❌ **拿 `F401` 或"某个 deprecation 规则"当 Python 侧的幻觉闸门。** F401 只查未使用的 import，Ruff 也没有通用 deprecation 规则集。配完自我感觉良好，实际一个幻觉都拦不住。
+- ❌ **盲信 AI 推荐的包名、直接安装。** 幻觉包是 slopsquatting 攻击向量（Endor Labs）。安装前查 registry，并用 lockfile 锁版本。
+- ❌ **在 JS / Python 弱约束语言里放手让 LLM 写、不设类型和 lint。** 会"everything goes off the rails"（[@waterTanuki](https://news.ycombinator.com/item?id=47234917)，040 已引）。类型系统是挡幻觉的第一道闸。
+- ❌ **让 agent 不查文档就写 API 调用。** diffray 的 RAG 能降幻觉 60-80%。应让 agent 先用 Context7 查官方文档再写，而不是凭训练记忆脑补。
+- ❌ **机审的 REVIEW.md 不设 verification bar。** 少了这条，机审会靠"命名推断"判断 API 是否存在，一样会被幻觉骗。要加上 "behavior claims need `file:line` citation"。
+- ❌ **查出幻觉后让 agent 改、结果越改越编出新的幻觉 API。** 这是另一个问题，属于调试何时停手（见 [#043](./043-fix-loop-when-to-stop-debugging.md)），不是查防本身的问题。
+
+---
+
+## 延伸
+
+**交叉引用：**
+
+- [#040 AI 说"做完了"、测试也全绿，怎么知道代码是真的对？](./040-who-verifies-ai-code-and-how.md)——验证体系总览。本篇是它"约束层"那一行加幻觉指针的深入。040 给体系全景，本篇给幻觉查防手法。必引。
+- [#041 怎么 review AI 生成的代码？（人审 + 机审策略）](./041-how-to-review-ai-generated-code.md)——人审执行侧。本篇机审段的"REVIEW.md verification bar / repo-specific checks"通用模板指向这里。041 给人审四段工作流加 REVIEW.md 七个 pattern，本篇只展开其中挡幻觉的两条。
+- [#030 TDD 在 AI coding 里怎么做？](../04-execution-workflow/030-tdd-in-ai-coding.md)——本篇"运行验证挡幻觉"段的手段指针。跑 build / test / import 是 TDD 运行验证的一环。
+- [#043 AI 改不对 bug、陷入 fix loop / 越改越糟，什么时候必须停、怎么跳出？](./043-fix-loop-when-to-stop-debugging.md)——本篇反模式段"越改越编新幻觉"的指针。
+
+**参考资料：**
+
+- [arXiv:2406.10279 — We Have a Package for You!](https://arxiv.org/abs/2406.10279)——16 个 LLM × 576,000 样本（Python + JS）× 223 万推荐包 × 19.7% 幻觉（440,445 个，含 205,474 个唯一）× 58% 重复可被 slopsquatting 抢注（学术，UT San Antonio + Virginia Tech + Oklahoma，2024；该文即 USENIX Security 2025 会议论文，[#030](../04-execution-workflow/030-tdd-in-ai-coding.md) 引的 5.2%/21.7% 与此同源）✅
+- [CC Docs: best-practices](https://code.claude.com/docs/en/best-practices)——"Give Claude something that produces a **pass or fail**, and the loop closes on its own" 加 "show evidence rather than asserting success"（官方，2026-06）✅
+- [CC Docs: code-review](https://code.claude.com/docs/en/code-review)——REVIEW.md 的「Verification bar」加「Repo-specific checks」加 verification step "filter out false positives"（官方，2026-06）✅
+- [Endor Labs: The Most Common Security Vulnerabilities in AI-Generated Code](https://www.endorlabs.com/learn/the-most-common-security-vulnerabilities-in-ai-generated-code)——幻觉依赖定义、slopsquatting 攻击向量、dependency explosion（注：安全厂商，卖 SCA 工具，标商业立场；事实论断可引，不引产品段）
+- [diffray: LLM Hallucinations in AI Code Review](https://diffray.ai/blog/llm-hallucinations-code-review/)——缓解策略分层（RAG 60-80% / Static Analysis 89.5% / CoVe 28% FACTSCORE / Multi-Agent 85.5%）加 "confident test-takers, not careful reasoners" 根因（注：code review SaaS 厂商，标商业立场，数字多转引学术源）
+- [shiftasia: How to Review AI-Generated Code](https://shiftasia.com/column/how-to-review-ai-generated-code-the-complete-developers-guide/)——幻觉 API 定义、Layer 3 API integrity 检查法、红旗清单、"Do not trust your memory of the API"（注：QA 外包公司，标商业立场）
+- [eslint-plugin-import: no-unresolved](https://github.com/import-js/eslint-plugin-import/blob/main/docs/rules/no-unresolved.md)——"ensures an imported module can be resolved to a module on the local filesystem"，本文 flat config 与自测报错文案来源（官方文档，2026-08 复核）✅
+- [Ruff Rules 索引](https://docs.astral.sh/ruff/rules/)——核实 Ruff 无 `import/no-unresolved` 等效规则；F401 = unused-import；deprecation 规则仅有库专属的 `NPY0xx`/`NPY201`/`AIR3xx`（官方文档，2026-08 复核）✅
+- [Pyright configuration](https://github.com/microsoft/pyright/blob/main/docs/configuration.md)——`reportMissingImports` 默认 `"error"`；本文 pyright 报错文案为 2026-08 本机实跑输出（官方文档 + 实测）✅
+- [mypy: Running mypy and managing imports](https://mypy.readthedocs.io/en/stable/running_mypy.html)——`Cannot find implementation or library stub for module named "x"` 报错文案，以及 `ignore_missing_imports` 会吞掉该报错（官方文档，2026-08 复核）✅
+- [pip NEWS #13188](https://github.com/pypa/pip/blob/main/NEWS.rst)——"Remove `experimental` warning from `pip index versions` command"，落在 pip 25.1（2025-04-26）（官方 changelog，2026-08 复核）✅
+- [pip-audit README](https://github.com/pypa/pip-audit)——自述为 "scanning Python environments for packages with known vulnerabilities"，即本文"SCA 抓不到源码片段里的幻觉 import"的依据（官方，2026-08 复核）✅
+- [PyPI JSON API](https://docs.pypi.org/api/json/) / [npm registry API](https://github.com/npm/registry/blob/main/docs/REGISTRY-API.md)——本文判包存在性、首次发布时间、下载量的命令来源；`404` / `200` 与示例输出为 2026-08 本机实测（官方 + 实测）✅
+- [Context7 官方 README](https://github.com/upstash/context7)——现行工具名 `resolve-library-id` + `query-docs`（官方，2026-08 复核）✅
+- [V2EX 1172660 @liyafe1997](https://www.v2ex.com/t/1172660)——"西瓜树"比喻加 token 概率根因（社区，2025-11）✅
+- [Stack Overflow Developer Survey 2025: AI](https://survey.stackoverflow.co/2025/ai)——"46% distrust vs 33% trust vs 3% highly trusting"（官方调查，2025）✅
+- [obra: verification-before-completion](https://github.com/obra/superpowers/blob/main/skills/verification-before-completion/SKILL.md)——"NO COMPLETION CLAIMS WITHOUT FRESH VERIFICATION EVIDENCE"（社区权威，2026）✅
+- [HN 43233903 — Hallucinations in code are the least dangerous form of LLM mistakes](https://news.ycombinator.com/item?id=43233903)——幻觉"相对易检测"（编译或运行时现形）的论点方向，加原文 "any hallucinated methods will be instantly obvious" 逐字核到、jchw 等评论转贴此句（社区，2025-03）
+- [HN 47234917 @waterTanuki](https://news.ycombinator.com/item?id=47234917)——JS / Python 弱约束语言里放手让 LLM 写会 "everything goes off the rails"（社区，2026-02）
+
+> 本篇个人实践（L4）：`[待补：BOSS 遇到过哪些幻觉 API/包 / 用 Context7 查文档挡幻觉的实际经验 / REVIEW.md verification bar 写了什么 / 哪种手段最先挡住幻觉]`
