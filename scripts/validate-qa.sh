@@ -4,9 +4,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-TOPICS=(01-mindset-and-tools 02-context-engineering 03-spec-and-planning \
-        04-execution-workflow 05-quality-assurance 06-engineering-collab \
-        07-efficiency-and-cost 08-team-and-org 09-tool-reliability)
+TOPICS=(01-心智与工具 02-上下文工程 03-需求与规划 \
+        04-执行工作流 05-质量保证 06-工程协作 \
+        07-效率与成本 08-团队与组织 09-工具可靠性)
 
 REQUIRED_META=("难度" "主题" "工具" "题型")
 REQUIRED_SECTIONS=("## TL;DR" "## 为什么" "## 怎么做" "## 反模式" "## 延伸")

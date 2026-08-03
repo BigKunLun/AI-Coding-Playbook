@@ -1,4 +1,34 @@
-.DS_Store
-.discovery/
-docs/*.html
+# ---- 生成产物 ----
+# md2html 等工具产出的 HTML 是可再生产物，源文件是 .md，不入库
+*.html
+*.pdf
 *.log
+
+# ---- 内容工作区（不对外）----
+.discovery/
+docs/drafts/
+
+# ---- 本地工具配置 ----
+.claude/settings.local.json
+.env
+.env.*
+!.env.example
+
+# ---- 编辑器 ----
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ---- 系统 ----
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+
+# ---- 依赖与缓存（若后续接静态站点生成器）----
+node_modules/
+.cache/
+tmp/
