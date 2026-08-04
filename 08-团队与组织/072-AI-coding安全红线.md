@@ -10,6 +10,7 @@
 | 工作目录里躺着 `.env`、云凭证 | 挪进 secret manager，permissions 加 denyRead | 运行时注入，不落盘 |
 | 全量 auto-approve，或 MCP 全放行 | 关掉 bypass，MCP 清单入 git 走白名单 | 官方不对任何 MCP server 做安全审计 |
 | 只 deny 了 `curl` / `wget` | 补上 `ping`、`nslookup`、`dig`、`host`，开 `/sandbox` | 出网通道不止一条，要纵深防御 |
+| clone 完直接在陌生仓库里开会话 | 先查 `.claude/`、`.mcp.json`、postinstall 脚本再 trust | 仓库能夹带 skill 和 hook，trust 即生效 |
 | 以为买了 Enterprise 就自动有 ZDR | 找客户团队按 organization 单独开通 | ZDR 不含在标准 Enterprise 套餐里 |
 | 怀疑密钥已泄露 | 先轮换全部可能被读到的密钥，再查证据 | 排错六步见「怎么做」最后一节 |
 
@@ -60,7 +61,11 @@ env | grep -E 'CLAUDE_CODE_USE_BEDROCK|CLAUDE_CODE_USE_VERTEX|ANTHROPIC_BASE_URL
 4. **加 secret 扫描 hook。**用 PreToolUse hook 拦截含密钥的提交和外发，配合 gitleaks 或 trufflehog。
 5. **别把生产密钥放在 agent 够得到的地方。**CVE-2025-55284 的直接前提就是 `.env` 躺在工作目录里[^2]。
 
-团队级 `.claude/settings.json` 安全基线：
+团队级 `.claude/settings.json` 安全基线见下面折叠块，可直接抄。
+
+<details>
+
+<summary>团队级 settings.json 安全基线 + 13 条敏感文件 deny 清单（可直接抄）</summary>
 
 ```json
 {
@@ -79,6 +84,68 @@ env | grep -E 'CLAUDE_CODE_USE_BEDROCK|CLAUDE_CODE_USE_VERTEX|ANTHROPIC_BASE_URL
 
 手动补上 `ping`、`nslookup`、`dig`、`host`，是对「DNS 外泄」那类攻击做纵深防御：即便官方已把它们移出自动白名单，显式 deny 能让它们连「批准一次」的机会都没有。具体配置项以你所在版本的 [permissions 文档](https://code.claude.com/docs/en/permissions) 为准。
 
+上面只列了 `.env` 和两个云凭证目录，实际该护住的敏感文件远不止这些——凭证的形态很杂，漏一类就等于没堵，完整 13 条如下：
+
+```json
+{
+  "permissions": {
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.local)",
+      "Read(./.npmrc)",
+      "Read(./.pypirc)",
+      "Read(~/.ssh/**)",
+      "Read(~/.aws/credentials)",
+      "Read(~/.config/gcloud/application_default_credentials.json)",
+      "Read(~/.docker/config.json)",
+      "Read(./**/*.pem)",
+      "Read(./**/*.key)",
+      "Read(./**/*-service-account.json)",
+      "Read(~/.claude.json)",
+      "Read(./.mcp.json)"
+    ]
+  }
+}
+```
+
+分四类看，就知道它为什么不能再短：包管理器凭证（`.npmrc`、`.pypirc`，直接连着发布权限）、云与容器凭证（AWS / gcloud / Docker / service account）、私钥文件（`.ssh`、`.pem`、`.key`），以及**agent 自身的配置文件**（`~/.claude.json`、`.claude/settings.json`、`.mcp.json`）——最后这类最容易漏：读到它就知道你的护栏长什么样，写进去就等于自己给自己提权，deny 之外还要靠 sandbox 兜住写入。
+
+顺带一条同样重要的：**别做宽泛 allow**。`Bash(*)`、`Bash(curl *)`、`Bash(npm *)`、`Bash(node *)`、`Bash(python *)` 这些看着方便，实际把整条命令通道敞开了——`npm` 能跑任意 script，`python` 能读任何文件。allow 只放固定低风险命令（`Bash(git status)`、`Bash(npm run lint)`、`Bash(npm test)`），网络请求、装依赖、执行脚本、改配置一律逐次确认。
+
+真正的防线顺序是：**权限边界 > 沙箱隔离 > token scope > 人工审批 > prompt 防御**。写在系统提示词里的「不要读密钥」排在最后一位，因为它是唯一可以被注入内容说服的那一层。
+
+</details>
+
+### 第二层补充：信任陌生仓库之前，先看它的 AI 指令入口
+
+`git clone` 完直接在里面开 agent，等于把这个仓库作者的指令当成了你自己的指令。仓库可以夹带 `.claude/skills/`、`.mcp.json`、hooks，在你信任工作区之后就自动生效。所以 trust 之前先过一遍八个位置——`.claude/`、`.claude/settings.json`、`.claude/skills/`、`.claude/hooks/`、`.mcp.json`、`package.json` 的 `scripts`、install / postinstall / prepare 脚本、GitHub Actions workflow。
+
+**怎么确认做对了**：clone 之后先别进目录开会话，在外面先跑折叠块里那两条排查命令（`ls -a repo/.claude repo/.mcp.json` 与 grep `postinstall`），有输出就人工看过再决定 trust。看到下面任何一条就停手：自动添加 MCP server、修改 Claude 全局配置、宽泛的 `allowed-tools`、hooks 自动执行、`curl | bash`、读 `.env` 或 `.ssh` 或云凭证、启动来路不明的本地 server。
+
+<details>
+
+<summary>排查命令、八个入口分别该看什么，以及第三方 Skill 怎么审</summary>
+
+```bash
+ls -a repo/.claude repo/.mcp.json 2>/dev/null
+grep -rn "postinstall\|prepare\|preinstall" repo/package.json 2>/dev/null
+```
+
+| 入口 | 看什么 |
+|---|---|
+| `.claude/` | 有没有你没预期的目录 |
+| `.claude/settings.json` | 有没有预授权的 allow、有没有关掉的护栏 |
+| `.claude/skills/` | skill 的 `allowed-tools` 是不是宽泛，目录里有没有脚本 |
+| `.claude/hooks/` | 有没有自动执行的脚本 |
+| `.mcp.json` | 有没有自动添加的 MCP server |
+| `package.json` 的 `scripts` | 有没有伪装成正常任务的危险命令 |
+| `install` / `postinstall` / `prepare` | 装依赖时就会跑，不需要你批准 |
+| GitHub Actions workflow | 有没有由 issue / PR 内容触发的 AI workflow |
+
+第三方 Skill 要按「插件加自动化脚本包」审计，不能按普通 Markdown 审计：Skill 目录可以带脚本，内容可以在发给模型之前先跑一条 shell 命令并把输出替换进去，`allowed-tools` 还能在激活时预授权工具[^5]。装之前至少看：`SKILL.md` 的 frontmatter、`allowed-tools`、附带脚本、动态 shell 命令、是否要求改全局配置、是否访问外部网络、是否要求 bypass / dontAsk / auto 模式。
+
+</details>
+
 **怎么确认做对了**：在会话里让 Claude 跑一次 `ping example.com`，预期它被直接拒绝而不是弹出批准框；再让它读一次 `.env`，预期同样被拒。两条里有一条弹出了批准框，说明这份 settings 没生效或被上层覆盖。
 
 ### 第三层：组织政策
@@ -88,27 +155,91 @@ env | grep -E 'CLAUDE_CODE_USE_BEDROCK|CLAUDE_CODE_USE_VERTEX|ANTHROPIC_BASE_URL
 3. **审计与监控。**用 `ConfigChange` hook 拦会话内改配置，用 OpenTelemetry 监控用量与异常（见 [#071](./071-AI-coding效能怎么度量.md)）。
 4. **MCP 白名单。**官方明确不对任何 MCP server 做安全审计[^4]，所以 MCP 清单要入 git，只用自己写的或可信来源的。
 
+MCP server 不是提示词，它是工具入口——本地 stdio server 本质上就是一个跑在你机器上的进程。装之前审四项（来源、command、scope、auth），别只看名字，名字最容易伪装。
+
+<details>
+
+<summary>MCP 四项审计具体看什么，以及高权限 server 的账号隔离</summary>
+
+| 审什么 | 具体看 |
+|---|---|
+| 来源 | 是不是官方、有没有长期维护、发布链路可不可信 |
+| command | 实际执行的完整命令是什么，有没有 install / postinstall |
+| scope | 能碰到哪些目录、API、账号和系统 |
+| auth | token 存在哪、是不是明文、会不会被转发出去 |
+
+高权限那类（GitHub、Jira、Notion、数据库、云服务）再加一层账号隔离：单独账号、最小 scope、只读优先、短期 token，不接生产、不给发布权限。目标是让 token 即使泄露也只造成有限损失。
+
+</details>
+
+**怎么确认做对了**：`claude mcp list` 输出的每一项，都能在 git 里的白名单清单上找到对应条目，且你说得出它的完整启动命令。
+
+<details>
+
+<summary>企业侧 managed-settings.json 完整示例（可直接抄）</summary>
+
+放在 macOS `/Library/Application Support/ClaudeCode/managed-settings.json`、Linux `/etc/claude-code/managed-settings.json`、Windows `C:\Program Files\ClaudeCode\managed-settings.json`。这一层优先级最高，任何用户或项目配置都覆盖不了它（分层机制见 [#083](../09-工具可靠性/083-permissions和hooks拦不住.md)）。
+
+```json
+{
+  "permissions": {
+    "deny": [
+      "Bash(curl:*)", "Bash(wget:*)",
+      "Bash(ping:*)", "Bash(nslookup:*)", "Bash(dig:*)", "Bash(host:*)",
+      "Read(./.env)", "Read(./.env.local)",
+      "Read(./.npmrc)", "Read(./.pypirc)",
+      "Read(~/.ssh/**)", "Read(~/.aws/credentials)",
+      "Read(~/.config/gcloud/application_default_credentials.json)",
+      "Read(~/.docker/config.json)",
+      "Read(./**/*.pem)", "Read(./**/*.key)",
+      "Read(./**/*-service-account.json)",
+      "Read(~/.claude.json)", "Read(./.mcp.json)"
+    ],
+    "ask": ["Bash(git push:*)"],
+    "disableBypassPermissionsMode": "disable",
+    "allowManagedPermissionRulesOnly": true
+  },
+  "sandbox": {
+    "enabled": true,
+    "failIfUnavailable": true,
+    "allowUnsandboxedCommands": false,
+    "credentials": {
+      "files": [
+        { "path": "~/.aws/credentials", "mode": "deny" },
+        { "path": "~/.ssh", "mode": "deny" }
+      ]
+    }
+  },
+  "enableAllProjectMcpServers": false,
+  "forceLoginMethod": "console",
+  "cleanupPeriodDays": 7
+}
+```
+
+几个字段的用意：`allowManagedPermissionRulesOnly` 让用户和项目 settings 里的 allow / ask / deny 全部失效，只认这一份；`disableBypassPermissionsMode` 禁掉 `--dangerously-skip-permissions`；`allowUnsandboxedCommands: false` 关掉「沙箱里失败就退到沙箱外重试」的逃生口；`forceLoginMethod` 堵住员工用个人消费账号登录；`cleanupPeriodDays` 缩短本地明文会话记录的留存。各开关的行为细节和验收方法见 [#083](../09-工具可靠性/083-permissions和hooks拦不住.md)。
+
+**怎么确认做对了**：在受管机器上跑 `claude --dangerously-skip-permissions`，应当被拒绝启动；再在某个项目的 `.claude/settings.json` 里写一条 `"allow": ["Bash(curl:*)"]`，`/permissions` 里应当看不到它生效。
+
+</details>
+
 ### 出口检查：进生产库前扫许可证
 
 前三层管「数据别流出去」，这一层管反向风险：模型吐回来的东西干不干净。模型可能复现训练数据里的片段，第三方的侵权主张是独立成立的。
 
 先破一个误解：**大家一提许可证污染就只盯 GPL，其实没标 license 的公开代码风险更高。**MIT / BSD / Apache 都有署名要求；没标 license 的按默认全权保留，等于什么都不许你做。
 
+工具用 ScanCode：`pip install scancode-toolkit` 后跑 `scancode -clpi --json-pp scan.json ./src`（`-l` 许可证、`-c` 版权、`-p` 包清单、`-i` 文件信息），汇总命令见折叠块。
+
+**怎么确认做对了**：两步。一是扫描输出的许可证集合，跟你们的允许清单一致（典型清单：MIT / Apache-2.0 / BSD-3-Clause）；冒出 GPL-3.0、AGPL-3.0，或 ScanCode 报了行号说某文件带第三方版权声明，就停下来人工看那几行。二是故意往测试分支粘一段带 GPL 头的文件并 push，CI 必须变红——光配上不验证等于没配，`allow_failure: true` 忘删就静默失效了。
+
+<details>
+<summary>许可证集合汇总命令 + 接进 CI 的完整配置（GitLab CI 示例，GitHub Actions 同理）</summary>
+
 ```bash
-pip install scancode-toolkit
-
-# -l 许可证 -c 版权 -p 包清单 -i 文件信息
-scancode -clpi --json-pp scan.json ./src
-
 # 只看命中了哪些许可证
 python -c "import json;d=json.load(open('scan.json'));\
 print(sorted({m['license_expression'] for f in d['files'] for m in f.get('license_detections',[])}))"
 ```
-
-**怎么确认做对了**：两步。一是上面那条命令输出的许可证集合，跟你们的允许清单一致（典型清单：MIT / Apache-2.0 / BSD-3-Clause）；冒出 GPL-3.0、AGPL-3.0，或 ScanCode 报了行号说某文件带第三方版权声明，就停下来人工看那几行。二是故意往测试分支粘一段带 GPL 头的文件并 push，CI 必须变红——光配上不验证等于没配，`allow_failure: true` 忘删就静默失效了。
-
-<details>
-<summary>接进 CI 的完整配置（GitLab CI 示例，GitHub Actions 同理）</summary>
 
 ```yaml
 license-scan:
@@ -148,6 +279,8 @@ AI coding agent 和传统补全式 AI 的根本区别，是它能读整台机器
 | **数据外泄** | 源码、对话历史、客户数据经「能出网的通道」流出 | agent 有 WebFetch、Bash、MCP 等多条出网路径，堵一条还有一条 |
 | **第三方上传** | 代码和 prompt 上传到模型厂商，被留存甚至用于训练 | 默认就在上传，问题在于「留多久、训不训、谁能看」 |
 
+放大这三条的机制统一叫间接提示注入：恶意指令不写在你的对话里，而是藏在 agent 会读到的外部内容里——README、issue、PR 评论、网页、日志、下载的文件。模型把「资料」当成了「指令」，而它手里有真实权限。MCP 是这里最隐蔽的一条路径：工具响应里可以夹带隐藏指令，恶意指令也可以藏在**工具描述**里——你在界面上看到的是简化后的信息，模型看到的是完整描述[^5]。所以危险的从来不是 prompt 本身，是 prompt 后面接着的文件系统、shell、发布 token。
+
 ### 官方数据政策的准确边界
 
 这是最多人搞错、也最该先对齐的一条[^1]。
@@ -165,13 +298,26 @@ AI coding agent 和传统补全式 AI 的根本区别，是它能读整台机器
 这条归 05 质量篇深讲，本篇只提示一点：安全红线里得有一层「AI 代码上线前过 SAST」（静态应用安全测试，即不运行代码、直接扫描源码找漏洞）。
 
 <details>
-<summary>三个真实已披露的事故（攻击链细节）</summary>
+<summary>四个真实已披露的事故（攻击链细节）</summary>
 
 **事故 A：CVE-2025-55284，Claude Code 经 DNS 偷密钥。**攻击链四步：Claude Code 早期把 `ping`、`nslookup`、`dig`、`host` 放进了无需确认就能跑的白名单；攻击者在一个「请 Claude review 一下」的文件里藏了间接提示注入指令；被注入的 Claude 去读 `.env` 和 `/proc/PID/environ`，用 `strings` 加 `grep` 抠出 API key；再把密钥编码成 DNS 子域名，用 `ping` 发给攻击者的服务器，全程零人工确认。官方的修复是把这几个命令移出自动白名单。研究者的点评更值得记：直接让 Claude 干坏事会被拒，用 `strings` 加 `grep` 绕一下就绕过了安全判断，所以防护不能只靠模型自觉。披露 2025-05-26，修复 2025-06-06（v1.0.4），CVSS 7.1[^2]。
 
 **事故 B：IDEsaster，30+ 漏洞横扫所有主流 AI IDE。**研究者半年挖出 30 多个漏洞、24 个 CVE，涉及 Cursor、Windsurf、GitHub Copilot、Claude Code 等。核心论断是：所有 AI IDE 实际上都在威胁模型里忽略了底层软件（IDE 本身），把自己的功能当作天然安全。攻击手法覆盖提示注入（藏在不可见 Unicode、HTML 注释、投毒的 MCP 里）、数据外泄、改 `.vscode/settings.json` 实现 RCE（CVE-2025-53773，Copilot）、密钥收割。这说明安全问题是整个品类的系统性问题，不是某一家的个案。
 
 **事故 C：Claudy Day，出网通道就是内置能力。**三个漏洞链成一次完整攻击：URL 参数里的隐形提示注入 + 用 Files API 外泄 + claude.com 的开放重定向。关键在于沙箱本身受限但允许连到 `api.anthropic.com`，于是内置能力被变成了外泄通道。教训是：只堵「明显的出网命令」不够，任何被允许的连接，哪怕是发往官方 API，都可能被当成外泄通道。漏洞已披露修复。
+
+**事故 D：Cline CLI 的 npm 投毒，AI workflow 把注入风险带进了供应链。**这一条按 Cline 官方 post-mortem 的口径写[^6]。2026-02-17，有未授权方用被窃取的 npm 发布令牌发布了 `cline@2.3.0`，该版本相对上一版的主要变化就一行：`package.json` 里加了 `"postinstall": "npm install -g openclaw@latest"`——装依赖时自动执行，不经过任何人批准。
+
+关于令牌怎么丢的，要把「已确认」和「可行链路」分开，别把后者写成前者：
+
+| 环节 | 高置信事实 | 表述边界 |
+|---|---|---|
+| 未授权发布 | `cline@2.3.0` 由受损的 npm publish token 发布 | 发布者身份未确认 |
+| AI triage | issue triage workflow 用 Claude Code Action 处理不可信的 GitHub issue，且带 Bash 权限 | 存在提示注入风险，这点可确定 |
+| cache 串味 | triage workflow 与 release workflow 共享 GitHub Actions cache 作用域，可能影响带发布凭据的 workflow | 是可行链路，不是唯一确认路径 |
+| 整改 | 移除 AI triage workflow、移除发布相关 cache、轮换凭据、迁移 npm OIDC provenance | 属 Cline 自述整改 |
+
+可复用的教训是配置层面的：**别让「不可信内容触发的 AI workflow」和「握着发布凭据的 workflow」共处一套 CI**。具体要避开的组合是——issue / PR / comment 触发 AI、AI workflow 有 Bash、AI workflow 碰 cache、和 release workflow 共享 cache 或 artifact、AI workflow 够得着 npm / PyPI / Docker 发布 token、发布用长期 token。稳妥做法：AI 只产出建议不碰发布凭据，release 走 OIDC / Trusted Publishing，triage 与 release 完全隔离。
 
 组织侧的量化背景：ProjectDiscovery 调研了 200 名安全从业者，只有 38% 认为能跟上 AI 出码的速度，78% 担心公司密钥暴露。另有一条常被引用的「43% 员工往 AI 工具输入过敏感数据」，它实际出自该报道转引的 2025 National Cybersecurity Alliance 报告，不是 ProjectDiscovery 本次调研，引用时别张冠李戴。
 
@@ -183,6 +329,8 @@ AI coding agent 和传统补全式 AI 的根本区别，是它能读整台机器
 - ❌ **以为「买了 Enterprise」或「走了 Bedrock」就等于零数据保留。**ZDR 要单独谈、逐组织开，且不覆盖 Bedrock / Vertex / Foundry。
 - ❌ **把 `.env` 和生产密钥留在工作目录里让 agent 随手能读。**这是 CVE-2025-55284 的直接前提，用 secret manager 运行时注入。
 - ❌ **只堵 `curl`、`wget` 就以为安全，或者无脑 auto-approve、全放行 MCP。**DNS 和官方 Files API 都能当外泄通道，官方也不审计任何 MCP server。
+- ❌ **clone 完直接在陌生仓库里开会话。**仓库能夹带 `.claude/skills/`、`.mcp.json`、hooks 和 postinstall 脚本，trust 之后自动生效，先过一遍那八个入口。
+- ❌ **让处理 issue / PR 的 AI workflow 和握着发布 token 的 workflow 共处一套 CI。**Cline 的 npm 投毒事件就发生在这个组合上。
 - ❌ **把红线写进 CLAUDE.md 当「强制」。**CLAUDE.md 是可被忽略的上下文，要强制就用 managed settings 加 hook；同理，配了 CI 许可证扫描却从没验证过能拦住，等于没配。
 
 <details>
@@ -222,17 +370,24 @@ AI coding agent 和传统补全式 AI 的根本区别，是它能读整台机器
 - [GitHub Copilot Trust Center FAQ](https://copilot.github.trust.page/faq) —— 支撑「Copilot IP 赔偿只覆盖 Business / Enterprise」（官方，2026-08 查证）
 - [ScanCode Toolkit](https://github.com/aboutcode-org/scancode-toolkit/) 与 [license detection 原理](https://scancode-toolkit.readthedocs.io/en/latest/explanation/scancode-license-detection.html) —— 支撑出口检查一节的命令与「能定位到许可证片段起止行」（开源项目官方，2026-08 查证）
 - [不懂就问-AI 开发 — V2EX 1219306](https://www.v2ex.com/t/1219306) —— 支撑「国内公司用国外 agent 的三条真实路径」（社区，2026-06）
+- [MCP Security Best Practices](https://modelcontextprotocol.io/docs/tutorials/security/security_best_practices) —— 支撑「本地 stdio MCP server 来自不可信来源的风险、一键配置前应展示完整启动命令」（官方，2026-07 整理）
+- [OWASP：MCP Tool Poisoning](https://owasp.org/www-community/attacks/MCP_Tool_Poisoning) 与 [Invariant Labs：MCP Tool Poisoning Attacks](https://invariantlabs.ai/blog/mcp-security-notification-tool-poisoning-attacks) —— 支撑「工具响应与工具描述夹带隐藏指令、界面所见少于模型所见」（社区安全研究，2026-07 整理）
+- [Claude Code Skills](https://code.claude.com/docs/en/skills) —— 支撑「Skill 可带脚本、可动态执行 shell、`allowed-tools` 预授权、项目 skill 在 trust 后生效」（官方，2026-07）
+- [Post-mortem: unauthorized Cline CLI npm publish](https://cline.ghost.io/post-mortem-unauthorized-cline-cli-npm/) —— 支撑事故 D 的全部事实与表述边界（厂商官方 post-mortem，事件 2026-02-17）
+- 敏感文件 deny 清单、陌生仓库 AI 入口检查清单、MCP 四项审计、managed-settings 示例 —— 个人研究与实践整理（2026-07）
 - [生成式人工智能服务管理暂行办法 — 中央网信办](https://www.cac.gov.cn/2023-07/13/c_1690898327029107.htm) —— 支撑数据出境话题的监管背景，第二十条涉及境外来源服务（官方，2023-07）
 
 [^1]: [Claude Code Data usage](https://code.claude.com/docs/en/data-usage) 与 [Zero data retention](https://code.claude.com/docs/en/zero-data-retention)（官方，2026-07 / 2026-08 核实）：商用条款下不用你的代码或 prompt 训练模型；消费版开训练留 5 年；ZDR 不含在标准 Enterprise 套餐里，由客户团队按组织开通，且不覆盖 Bedrock / Vertex / Foundry。
 [^2]: [Claude Code: Data Exfiltration with DNS (CVE-2025-55284) — embracethered](https://embracethered.com/blog/posts/2025/claude-code-exfiltration-via-dns-requests/)（社区安全研究）：披露 2025-05-26，修复 2025-06-06（v1.0.4），CVSS 7.1。
 [^3]: [GenAI Code Security Report — Veracode](https://www.veracode.com/blog/genai-code-security-report/)（行业，2025）：45% 的 AI 生成代码引入 OWASP Top 10 类漏洞，Java 场景失败率超 70%，新模型未见改善。
 [^4]: [Claude Code Security — Claude Code Docs](https://code.claude.com/docs/en/security)（官方，2026-07）：Anthropic 不对任何 MCP server 做安全审计。
+[^5]: [MCP Security Best Practices](https://modelcontextprotocol.io/docs/tutorials/security/security_best_practices)、[OWASP: MCP Tool Poisoning](https://owasp.org/www-community/attacks/MCP_Tool_Poisoning)、[Invariant Labs: MCP Tool Poisoning Attacks](https://invariantlabs.ai/blog/mcp-security-notification-tool-poisoning-attacks) 与 [Claude Code Skills](https://code.claude.com/docs/en/skills)（官方与社区安全研究，个人研究整理于 2026-07）：来自不可信来源的本地 stdio MCP server 可导致任意代码执行与数据外泄；工具响应与工具描述都能夹带隐藏指令，界面展示的信息可能少于模型看到的；Skill 可包含脚本、可在发送给模型前执行 shell 命令替换输出、可通过 `allowed-tools` 预授权工具，项目 skill 在 workspace trust 后生效。
+[^6]: [Post-mortem: unauthorized Cline CLI npm publish](https://cline.ghost.io/post-mortem-unauthorized-cline-cli-npm/)（厂商官方 post-mortem，事件 2026-02-17）：`cline@2.3.0` 由受损的 npm publish token 发布，新增 `postinstall` 全局安装外部包；triage 与 release workflow 共享 Actions cache 属可行链路而非已确认的唯一路径；整改含移除 AI triage workflow、轮换凭据、迁移 npm OIDC provenance。
 
 ---
 
 <sub>难度 高级 · 决策题 + 排错题 · 主线 Claude Code，横向 Cursor / Copilot · 技术护栏人人能自己配，部署选型与组织政策需负责人拍板</sub>
 
-<sub>**时效**：数据政策事实（商用默认不训练、标准留存 30 天、消费版开训练留 5 年、ZDR 不含在标准 Enterprise、本地明文会话记录与 `cleanupPeriodDays`、AES-256/KMS/CMEK、Development Partner Program 在 Bedrock/Vertex 不可用、第三方平台 telemetry 默认关闭）于 2026-07-18 逐项核实；出境与条款相关事实（ZDR 不覆盖三大云、Anthropic 赔偿只覆盖 paid use、Copilot IP 赔偿只给 Business/Enterprise）于 2026-08 核实。**已知不确定**：CVE 细节以各研究者原文为准；横向对比里的 Cursor / Copilot 条款为社区口径。**易变**：政策条款随官方更新即失效，签约或合规决策前以官方页面与商业条款为准；permissions 配置键名以你所在版本的文档为准。</sub>
+<sub>**时效**：数据政策事实（商用默认不训练、标准留存 30 天、消费版开训练留 5 年、ZDR 不含在标准 Enterprise、本地明文会话记录与 `cleanupPeriodDays`、AES-256/KMS/CMEK、Development Partner Program 在 Bedrock/Vertex 不可用、第三方平台 telemetry 默认关闭）于 2026-07-18 逐项核实；出境与条款相关事实（ZDR 不覆盖三大云、Anthropic 赔偿只覆盖 paid use、Copilot IP 赔偿只给 Business/Enterprise）于 2026-08 核实；MCP / Skills 风险机制、敏感文件清单、陌生仓库入口清单、MCP 四项审计与 Cline 事件复盘，来自个人研究整理，于 2026-07 核实。**已知不确定**：CVE 细节以各研究者原文为准；Cline 事件里「令牌经 Actions cache 泄露」只是 Cline 自述的可行链路，未被确认为唯一路径；managed-settings 示例里的字段名以你所在版本的 settings 文档为准；横向对比里的 Cursor / Copilot 条款为社区口径。**易变**：政策条款随官方更新即失效，签约或合规决策前以官方页面与商业条款为准；permissions 配置键名以你所在版本的文档为准。</sub>
 
 > 本篇个人实践（L4）：`[待补：BOSS 的实战经验/踩坑——部署模式实际怎么选、密钥外泄有没有踩过坑、managed settings 红线清单长啥样]`

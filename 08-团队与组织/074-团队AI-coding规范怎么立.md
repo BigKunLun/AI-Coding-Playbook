@@ -12,6 +12,7 @@
 | 同一条豁免申请出现了三次 | 改规范：要么批准一个受治理的工作流，要么把禁令写清楚 | 豁免是信号不是漏洞，按季度复盘 |
 | 产品或管理层拿 AI 出的方案直接压排期 | 要求方案标明哪部分是 AI 生成，并附已核对的接口清单 | 「人对产出负责」要覆盖所有进交付链路的 AI 产出 |
 | 被要求按「提示词条数 / AI 生成行数」考核 | 换成结果口径：交付周期、缺陷率、review 一次通过率 | 用量指标奖励拆碎和生成再删 |
+| 不知道这一版规范该管什么 | 用第零交付物的症状表定位卡在验证 / 信任 / 编排哪层 | 先诊断再立规范，别治不存在的病 |
 
 一条规则该强制还是该自由，只走这个流程：
 
@@ -27,6 +28,33 @@ flowchart TD
 ```
 
 ## 怎么做
+
+### 第零交付物：先诊断卡在哪层，再决定规范往哪写
+
+立规范之前先做一件事：搞清楚团队现在真正卡在哪。跳过这一步，写出来的规范多半是在治不存在的病。
+
+判断工具是下面这张症状表。三层是有依赖顺序的——**验证是地基，信任建在验证之上，编排在最顶**。没有可重复的验证证据，信任无从谈起；信任没校准，多 agent 编排必然崩[^5]。所以诊断出的最低那一层就是你这一版规范该管的地方，往上写没用。
+
+| 团队里听到的原话 | 卡在哪层 | 这一版规范该写什么 |
+|---|---|---|
+| 「AI 写的代码不敢直接合并」 | **验证层**（没有能判定对错的证据） | 把「任务必须有机器可判的验收标准」和 CI 门禁设成 must，见第一交付物 |
+| 「review 的时候忍不住自己重写一遍」 | **信任层**（信任没校准，非黑即白） | 写分级信任与责任归属：哪类代码可以只看结果、哪类必须逐行读；AI 产出由提交者负责 |
+| 「一个 agent 还行，多个就乱」 | **编排层**（状态和分工没设计） | 写任务粒度、上下文传递、人在哪个 gate 上介入 |
+| 「用了半年，效率没明显提升」 | 多半仍是**验证层**，返工吃掉了红利 | 别加规范，先把验证补上 |
+
+<details>
+
+<summary>三层各自要具备什么（诊断出来之后照这个补）</summary>
+
+| 层 | 要具备的 | 常见缺口 |
+|---|---|---|
+| **验证（地基）** | 机器可判的完成标准（可执行断言 / BDD）；分钟级 CI；单测 / 集成 / E2E / 性能 / 安全分层各管各的风险 | 「验证者悖论」——测试也是 AI 写的。用 mutation testing（故意改坏代码看测试能不能抓到）反向校验测试质量。CI 要 30 分钟，L3 级的 agent 自主闭环就不成立 |
+| **信任（中层）** | 分级信任而非全信/全不信（样板代码可以高、核心业务中等、安全与资金最低）；AI 改了什么为什么必须可见；团队共享的失败模式库（长上下文遗忘、幻觉 API、过时库版本） | 责任归属没写死，出事时「AI 写的」成了挡箭牌。正确口径是 AI 产出 = 提交者负责 |
+| **编排（顶层）** | 任务粒度切到「一个 agent 能独立完成且可独立验证」；agent 间上下文怎么传；人嵌在关键 gate 上而不是全程监工；产出可回滚可断点续 | 跳过验证直接堆 agent。这是最常见的翻车方式 |
+
+信任不是态度问题，是验证层给出的可重复证据。规范里写「要信任 AI」或「不要过度信任 AI」都是空话，只有把证据链写出来才可执行。
+
+</details>
 
 ### 第一交付物：强制 vs 自由分类表
 
@@ -88,10 +116,16 @@ flowchart TD
 
 ### 第四交付物：把规范当活文档运营
 
+<details>
+
+<summary>四条运营纪律（第一版不求完美 / 协作可编辑 / 豁免是信号 / 别顶替确定性工具）</summary>
+
 - **第一版不求完美。**第一版编码规范不会产出完美的 agentic 代码，那些失败就是反馈[^4]。
 - **保持协作可编辑。**把标准文件当成和工程团队的一场对话，让所有人都能编辑、评论、更新[^4]。
 - **豁免是信号，不是漏洞。**同一个豁免出现三次，要么批准一个受治理的工作流，要么把禁令写得更清楚[^2]。
 - **别让规则文档顶替确定性工具。**linter、formatter、静态分析在流水线里仍有一席之地，它们能抓住 agent 搞砸的基础问题[^4]。
+
+</details>
 
 <details>
 <summary>如果你是被 mandate 的那一方（不需要任何审批就能做的五件事）</summary>
@@ -174,17 +208,19 @@ Augment 把这个张力说得直白：代码库模式一致时，AI 助手是力
 - [Stack Overflow Blog: Building shared coding guidelines for AI (and people too)](https://stackoverflow.blog/2026/03/26/coding-guidelines-for-ai-agents-and-people-too/) —— 支撑第四交付物：第一版不完美、标准文件当团队对话、别放弃 linter/formatter（社区，Ryan Donovan，2026-03）
 - [V2EX 1229246: 产品经理开始用 AI 做「技术方案」了](https://www.v2ex.com/t/1229246) —— 支撑「为什么」第三节的上游案例，以及被 mandate 一方的「谁定义谁负责」「反向挑刺再打回」两条做法（社区，2025-07，2026-08-03 实访核实）
 - [V2EX 1221898: IT 团队没人愿意动脑子了](https://v2ex.com/t/1221898) —— 支撑「全链路依赖 AI、没人认真读过那个规划」与「脑子可以外包，责任不能外包」（社区，2026-08-03 实访核实）
+- 《AI 原生团队：成熟度光谱与转型诊断框架》—— 支撑第零交付物的验证 / 信任 / 编排三层依赖、症状对层的映射表，以及三层各自的构成要件（个人研究，2026-07，未公开）
 - [IBM: Standardize AI Code Generation Across Your Development Team](https://www.ibm.com/think/insights/standardize-ai-code-generation-across-your-development-team) —— 支撑「无标准时每个 agent 各走各的（Jest vs Mocha）」与 bounded autonomy 三要件（从业者综述，2026；页面 403 反爬，内容经搜索返回、未逐字二次核验）
 
 [^1]: [CC Docs: Settings](https://code.claude.com/docs/en/settings)（官方，2026）：设置优先级 Managed > 命令行参数 > Local > Project > User，Managed 不能被任何东西覆盖；`allowManagedPermissionRulesOnly` 阻止 user/project 定义 allow、ask、deny 规则；`allowManagedHooksOnly` 只加载 managed 及 managed 强制启用插件的 hooks。
 [^2]: [Metacto: AI Usage Policy Template for Developers 2026](https://www.metacto.com/blogs/creating-effective-ai-usage-policies-for-development-teams)（从业者指南，2026-07）：Confluence 里放个 PDF 改变不了行为；伪装成治理的禁令会失败，工程师只采纳让安全路径比绕路更省事的规则；同一豁免出现三次即应修改规范；披露要求与真实风险成比例。
 [^3]: [Augment Code: Enterprise Coding Standards — 12 Rules for AI-Ready Teams](https://www.augmentcode.com/guides/enterprise-coding-standards-12-rules-for-ai-ready-teams)（从业者指南，2025-09 发布 / 2026-06 更新）：模式一致时 AI 助手是 force multipliers，不一致时是 chaos amplifiers；命名风格选哪个不重要，全组一致才重要。
 [^4]: [Stack Overflow Blog: Building shared coding guidelines for AI (and people too)](https://stackoverflow.blog/2026/03/26/coding-guidelines-for-ai-agents-and-people-too/)（社区，2026-03）：第一版规范不会完美，失败就是反馈；标准文件应可被全员编辑评论；不要因此放弃 linter、formatter 等确定性执行器。
+[^5]: 个人研究（2026-07，AI 原生团队成熟度与转型诊断框架）：验证 / 信任 / 编排三层自下而上依赖，验证是地基；症状对层的映射（不敢合并 = 验证层、review 时自己重写 = 信任层、多 agent 就乱 = 编排层、效率没提升多半仍卡验证层）来自团队一线观察，非公开研究结论。
 
 ---
 
 <sub>难度 中级 · 决策题 + 配置题 + 流程题 · 主线 Claude Code，横向 Cursor / Copilot · 主要面向团队负责人与 Tech Lead，不是决策者可直接看「被 mandate 的那一方」折叠块</sub>
 
-<sub>**时效**：官方 settings 引用（五层优先级、`allowManagedPermissionRulesOnly` / `allowManagedHooksOnly`）于 2026-07-18 巡检复核并与现行文档一致；两条 V2EX 社区素材于 2026-08-03 实访核实；外链当时全部存活。**已知不确定**：IBM 那篇因 403 反爬未能逐字二次核验，「bounded autonomy」与「Jest vs Mocha」两处依赖它；GoGloby、Metacto、Augment 均为厂商或从业者指南，非实证研究。**易变**：managed settings 的具体键名与 server-managed settings 的可用版本随官方更新，配置前以 settings 文档为准；「强制/自由怎么划」的框架不依赖具体版本。</sub>
+<sub>**时效**：官方 settings 引用（五层优先级、`allowManagedPermissionRulesOnly` / `allowManagedHooksOnly`）于 2026-07-18 巡检复核并与现行文档一致；两条 V2EX 社区素材于 2026-08-03 实访核实；外链当时全部存活。第零交付物的三层诊断表于 2026-08-04 从一手研究笔记录入。**已知不确定**：验证 / 信任 / 编排三层框架与症状映射出自个人一手研究与团队一线观察，不是公开研究结论，别当行业标准引用；IBM 那篇因 403 反爬未能逐字二次核验，「bounded autonomy」与「Jest vs Mocha」两处依赖它；GoGloby、Metacto、Augment 均为厂商或从业者指南，非实证研究。**易变**：managed settings 的具体键名与 server-managed settings 的可用版本随官方更新，配置前以 settings 文档为准；「强制/自由怎么划」的框架不依赖具体版本。</sub>
 
 > 本篇个人实践（L4）：`[待补：BOSS 团队的强制清单实际几条 / 哪条最先落 managed policy / 哪条从强制降回自由 / 豁免流程踩过的坑]`

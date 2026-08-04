@@ -30,7 +30,11 @@ flowchart TD
 
 这一步零配置、收益最大。从 `packages/api/` 启动时，Claude 加载 `packages/api/CLAUDE.md` 和根目录的 `CLAUDE.md`，`packages/web/` 的任何指令都不会进上下文[^1]；文件访问也天然被框在这个子树里，除非你再授权。
 
-**怎么确认生效**：会话里跑 `/context`，看 Memory files 那一栏。预期只列出本包和仓库根两份 CLAUDE.md，没有同级包的。
+机制上是两条不同的加载规则叠出来的效果，值得记住：**CLAUDE.md 沿目录树向上回溯，`settings.json` 不回溯。** 从 `packages/api/` 启动，往上一路到仓库根的 CLAUDE.md 都会加载，所以全仓通用约定不会丢；而 `.claude/settings.json` 只按固定的五层优先级叠加（企业管理 > 命令行 > 项目 local > 项目 > 用户），不会去父目录里找，也不会懒加载子目录的[^6]。
+
+这条不对称正是「从包目录启动」的硬理由：**它是唯一能同时拿到「祖先的 CLAUDE.md」和「本包 settings.json」的启动方式。** 反过来从仓库根启动，`packages/api/.claude/settings.json` 里那些包专属的 deny 规则、`additionalDirectories`、hook 全部读不到 —— 它既不在根目录的祖先链上，也不会被懒加载。
+
+**怎么确认生效**：会话里跑 `/context`，看 Memory files 那一栏。预期只列出本包和仓库根两份 CLAUDE.md，没有同级包的。包专属 settings 是否生效，用 `/permissions` 看 deny 列表里有没有你在本包配的规则。
 
 ### 第 2 步：分层写 CLAUDE.md
 
@@ -153,7 +157,7 @@ CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1 claude --add-dir ../shared   # �
 ## 别这么干
 
 - ❌ **一个根 CLAUDE.md 塞下所有包的约定。** 要么膨胀到烧光上下文预算，要么泛到没用。分层，每个目录一份。
-- ❌ **单包任务也从仓库根启动。** 白白让十几个无关包的记忆和文件有机会进上下文。`cd` 一下就能天然框住范围。
+- ❌ **单包任务也从仓库根启动。** 白白让十几个无关包的记忆和文件有机会进上下文，而且该包 `.claude/settings.json` 里的权限规则和 hook 一条都读不到（settings 不向上回溯也不懒加载）。`cd` 一下就能天然框住范围。
 - ❌ **跨包改动分成多个会话、逐包改。** 会重新推导、决策不一致。共享改动和它的调用方要在一个会话里一起给。
 - ❌ **跨包改动拆成多个 commit。** 留下 build 崩掉的中间态。所有受影响的包一次提交。
 - ❌ **长跨包会话不落盘计划。** 一旦 compact，计划就丢了，它会漏掉没改的调用方。动手前先把清单写进 markdown 文件。
@@ -185,6 +189,8 @@ CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1 claude --add-dir ../shared   # �
 - [Set up Claude Code in a monorepo or large codebase — Claude Code Docs](https://code.claude.com/docs/en/large-codebases) —— 本篇权威源：per-dir CLAUDE.md、`claudeMdExcludes`、`Read` deny、`sparsePaths`、per-dir skills、`--add-dir` 加载差异表、跨包两条法则全部出自此（官方，2026-07）
 - [Claude Code with Monorepos — Phos AI Labs](https://phosailabs.com/blog/claude-code-monorepos) —— 支撑「跨包改动是最高风险类」「多 commit 造成 build 破窗」「原子提交」三处论断（社区，2026-04）
 - [Claude Code for Monorepo Development — lowcode.agency](https://www.lowcode.agency/blog/claude-code-monorepo) —— 支撑「从包目录启动做上下文切片」在实践中被反复验证（社区，2026，与官方文档说法一致但为二手复述）
+- 《多仓库 CLAUDE.md 配置方案》（内部项目笔记）—— 支撑「CLAUDE.md 向上回溯、settings.json 不回溯」这条不对称，及由此得出的启动位置结论（个人研究，2026-07）
+- [Claude Code settings — Claude Code Docs](https://code.claude.com/docs/en/settings) —— settings 五层优先级叠加，无父目录回溯（官方）
 - [How I Organized My CLAUDE.md in a Monorepo — dev.to/anvodev](https://dev.to/anvodev/how-i-organized-my-claudemd-in-a-monorepo-with-too-many-contexts-37k7) —— 支撑「根 CLAUDE.md 会膨胀」与「`@` 引用不省 token」两处论断（社区，单人经验）
 
 [^1]: [Set up Claude Code in a monorepo or large codebase — Claude Code Docs](https://code.claude.com/docs/en/large-codebases)（官方，2026-07）：大仓默认设置会用无关指令和文件读取填满上下文窗口；从子目录启动只加载该目录及所有祖先目录的 CLAUDE.md。
@@ -192,11 +198,12 @@ CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1 claude --add-dir ../shared   # �
 [^3]: 同上：长的跨包会话会一路压缩上下文，落盘的计划能活过对话历史。
 [^4]: [Claude Code with Monorepos — Phos AI Labs](https://phosailabs.com/blog/claude-code-monorepos)（社区，2026-04）：跨包改动是 monorepo 开发里风险最高的一类；拆成多个 commit 会制造 build 损坏的窗口。
 [^5]: [Claude Code Docs: large-codebases](https://code.claude.com/docs/en/large-codebases)（官方，2026-07）：不论用哪种方式添加目录，Claude 都能读取和编辑其中的文件。
+[^6]: [Claude Code Docs: memory](https://code.claude.com/docs/en/memory)（官方）：CLAUDE.md 从 cwd 向上递归查找到根目录，沿途每份都加载；子目录的只在读到该目录文件时才加载。[Claude Code Docs: settings](https://code.claude.com/docs/en/settings)（官方）只定义了固定的五层优先级叠加，未定义任何沿父目录回溯的行为 ——「所以从包目录启动才能精准拿到该包配置」这一推论出自个人研究笔记《多仓库 CLAUDE.md 配置方案》（内部项目笔记）（个人研究，2026-07-01）。
 
 ---
 
 <sub>难度 中级 · 配置题 · 主线 Claude Code，横向 Cursor / Copilot</sub>
 
-<sub>**时效**：全部配置键（`claudeMdExcludes`、`permissions.deny` 的 Read 规则、`worktree.sparsePaths` / `symlinkDirectories`、`additionalDirectories` / `--add-dir` 及其加载差异表）已于 2026-07-18 对照官方 large-codebases 文档逐项核实。**已知不确定**：「20 个包 / 15 个无关包」是举例说明用的数量级，不是实测统计。**易变**：LSP 插件的安装命令与插件名、`worktree.*` 配置键随版本迭代快，动手前回查官方文档。</sub>
+<sub>**时效**：全部配置键（`claudeMdExcludes`、`permissions.deny` 的 Read 规则、`worktree.sparsePaths` / `symlinkDirectories`、`additionalDirectories` / `--add-dir` 及其加载差异表）已于 2026-07-18 对照官方 large-codebases 文档逐项核实；CLAUDE.md 向上回溯与 settings 五层优先级于 2026-08-04 复核。**已知不确定**：「20 个包 / 15 个无关包」是举例说明用的数量级，不是实测统计；「settings.json 不向上回溯」是从官方 settings 文档只定义五层优先级、未定义回溯行为推出的，官方没有正面的否定表述。**易变**：LSP 插件的安装命令与插件名、`worktree.*` 配置键随版本迭代快，动手前回查官方文档。</sub>
 
 > 本篇个人实践（L4）：`[待补：BOSS 的实战经验/踩坑]`

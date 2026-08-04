@@ -101,11 +101,11 @@ Claude Code 官方遥测文档里，claude_code.lines_of_code.count 的说明只
 | 代码质量退化 | 重复代码占比、两周内 churn 率 | 任一项连续两季度单向上升 | 把「重构占比」加进本季度目标 |
 | 指标被针对性优化 | 抽查 3 个数字最好看的 PR，人读 diff | 出现凑数提交、空断言测试、无意义拆分 | 该指标立即下线，别修，直接停 |
 
-上表 20% 这个数是本篇给的起步值，不是任何框架的官方阈值；跑满两个季度后按自己团队的历史波动幅度调整。
+上表 20% 这个数是**个人假设的起步值**，没有任何框架或研究给出过这个阈值，别把它当引用。它的作用只是让你第一个季度有个能动手的线；跑满两个季度后，换成你自己团队吞吐量的历史波动幅度（例如取过去 8 个季度环比变化的标准差）。
 
 ### 第四步：三条硬规矩
 
-1. **产出和吞吐指标只在团队或组织级别看，绝不落到个人绩效。**DX Core 4 对 "diffs per engineer" 有明确告诫：不要设成个人目标，不要与奖惩挂钩[^2]。任何「人均产出」指标最终都会在绩效评估里被当武器用。
+1. **产出和吞吐指标只在团队或组织级别看，绝不落到个人绩效。**这条要拆成三句可执行的口径，缺一句都会漏：**只做团队级聚合、只与本人历史基线纵向比、禁止跨人横向比较**。生产环境在用的商用效能产品（DX、Faros）对 AI 加权类指标全部写死了这三条[^6]。DX Core 4 对 "diffs per engineer" 也有明确告诫：不要设成个人目标，不要与奖惩挂钩[^2]。任何「人均产出」指标最终都会在绩效评估里被当武器用。
 2. **组合优于单点。**一组相互制衡的指标比单个指标更能反映全局[^4]。
 3. **客观数据要配主观信号。**纯遥测漏掉认知负荷、心流和返工的痛感，用季度开发者体验调研补齐。
 
@@ -289,6 +289,8 @@ claude_code_session_count_total{team_id="platform",department="engineering"} 3
 
 AI 还带来一笔特有的隐藏成本，叫验证税：省下的写代码时间被重新花在审查和验证上。所以「代码写得快」根本没进入交付方程的分子。验证具体怎么做见 [#040](../05-质量保证/040-怎么验证AI代码是真的对.md)，但在度量上你必须承认这笔税存在，否则吞吐数字全是幻觉。
 
+把几个独立来源的数字并排放，会看到同一条主线：**AI 让个人变快，把消化成本推给下游和未来**（数字与硬度见下面「关键数字与翻车现场」折叠块）。
+
 ### 只测吞吐会漏掉一个已被实证的质量退化
 
 GitClear 分析了 2020 到 2024 年的 2.11 亿行代码变更，在 AI 普及的这几年里量到三个退化信号[^3]：代码克隆（重复代码块）增长约 4 倍；重构占变更行的比例从 2021 年的 25% 跌到 2024 年不足 10%，同期复制粘贴的克隆代码从 8.3% 升到 12.3%；两周内被返工的短期 churn 代码持续上升。
@@ -302,6 +304,33 @@ GitClear 分析了 2020 到 2024 年的 2.11 亿行代码变更，在 AI 普及�
 - ❌ **用单一指标下结论。**任何单指标都会被刷，要用相互制衡的指标组。
 - ❌ **把团队级吞吐指标落到个人绩效。**DX Core 4 明确要求这类指标绝不用于个人层面；Claude 遥测的 `user.email` 让这在技术上可行，所以制度上必须禁止。
 - ❌ **只测 AI 用量、不测交付结果。**Claude 遥测测的是投入侧，质量与影响维度要从 Git、CI、事故系统取数。
+
+<details>
+
+<summary>关键数字与四个翻车现场</summary>
+
+**五组数字，一条主线：AI 让个人变快，把消化成本推给下游和未来。**
+
+| 来源 | 数字 | 硬度 |
+|---|---|---|
+| DORA 2024 | AI 采用度每提高 25%，吞吐量下降 1.5%、交付稳定性下降 7.2%（归因是批量变大）[^7] | 行业权威研究 |
+| DORA 2025 | 吞吐量首次转为正相关，稳定性仍为负[^1] | 行业权威研究 |
+| DX 纵向数据 | AI 编码工具带来的真实吞吐提升约 7.8%，远低于厂商宣传[^6] | 厂商自有数据，未见独立复现 |
+| GitClear（2.11 亿行） | 克隆代码约 4 倍增长；两周内返工率 5.5% → 7.9%；重构占比 25% → 不足 10%[^3] | 行业研究 |
+| METR 2025 | 16 名资深开发者、246 个真实任务：自评 AI 提速 20%，实测反而慢 19%[^8] | 学术实验，样本小 |
+
+METR 那条要连 caveat 一起引：它的场景对 AI 极不利（资深工程师 + 极熟悉的成熟大代码库），绿地项目结论可能反转。拿它论证「AI 没用」是误读，它真正说明的是**主观提速感和客观数据可以反向**——所以别用「大家觉得快多了」当效能证据。
+
+**四个已经翻车的现场，都是把用量当 KPI 的后果。**这四个案例的共同点：指标本身没写错，错在它被挂上了奖惩。挂上的当月，人就开始优化指标而不是优化工作。
+
+- **按 token 消费定下限。**某美国上市 SaaS 公司给工程师定了「每人每月约 $175 token 消费」的下限，结果是集体刷 token：明知答案还要问一遍 AI、纯为凑指标跑 agent[^9]。这条最值得记，因为它证明了连「成本指标」反着用也能变成刷量激励。
+- **按 AI 采用率施压。**某美国上市加密交易平台的 CEO 强推 AI 采用率，未按时上线的人被叫去周六开会解释，有人因此离职或被辞退；CEO 后来自认做过了头[^9]。
+- **周报填「AI 节省工时」。**国内某公司要求每周填这个数字，员工的应对是编数字，甚至用 AI 生成周报来凑——度量本身制造了表演型忙碌[^9]。
+- **AI 代码占比当 KPI。**国内某大型互联网公司的技术负责人公开反思，把「AI 代码占比不该当 KPI」列为第一条教训[^9]。
+
+反过来看，这四个都可以用「怎么做」第四步那三句口径挡掉：团队级聚合、纵向自比、禁止跨人比较。指标一旦和奖惩解耦，操纵动机就消失了，粗糙的精度做趋势判断反而够用。
+
+</details>
 
 <details>
 <summary>三大框架横向对比（选型对照表）</summary>
@@ -340,6 +369,10 @@ GitClear 分析了 2020 到 2024 年的 2.11 亿行代码变更，在 AI 普及�
 - [Monitoring — Claude Code Docs](https://code.claude.com/docs/en/monitoring-usage) —— 支撑第五步的指标清单、属性名、`cost.usage` 是近似值、`user.email` 始终携带（官方，2026-08-03 核对）
 - [OpenTelemetry Collector: Prometheus Exporter](https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/exporter/prometheusexporter) —— 支撑折叠块里的 collector 配置与「只接受 cumulative」这条限制（官方，2026-08 访问）
 - [Prometheus: Using Prometheus as your OpenTelemetry backend](https://prometheus.io/docs/guides/opentelemetry/) —— 支撑指标名转换规则（点变下划线、计数器加 `_total`）（官方，2026-08 访问）
+- [DORA Report 2024](https://dora.dev/research/2024/dora-report/) —— 支撑「AI 采用度每 +25%，吞吐 -1.5%、稳定性 -7.2%」（行业权威，2024）
+- [METR: Measuring the Impact of Early-2025 AI on Experienced Open-Source Developer Productivity](https://arxiv.org/pdf/2507.09089) —— 支撑「自评提速 20%、实测慢 19%」及其场景 caveat（学术，2025）
+- [Faros AI: The AI Software Engineering Productivity Paradox](https://www.faros.ai/blog/ai-software-engineering) / [DX: How to measure AI impact](https://getdx.com/blog/measure-ai-impact/) —— 支撑「真实吞吐提升约 7.8%」与「团队级聚合 / 纵向自比 / 禁止跨人比较」三条口径（厂商研究，2026）
+- [token maximizing 现象综述](https://tldrecap.tech/posts/2026/aie-europe/token-maximizing-big-tech-metrics/)（社区，2026，二手转述）与《AI 时代研发效能度量与绩效评估》（个人研究，2026-07，未公开）—— 支撑折叠块里「关键数字对照表」与「四个翻车现场」，其中「按 token 消费定下限导致集体刷 token」出自前者
 - [V2EX 1217703: 必须对 AI 进行严肃的绩效考核](https://www.v2ex.com/t/1217703) —— 支撑「token 量定 KPI 比代码量更蠢」与「给单元测试糊个 return」这个刷指标实例（社区，2026-06）
 
 [^1]: [DORA Report 2025: State of AI-Assisted Software Development](https://dora.dev/dora-report-2025/)（行业权威，2025）：AI 的主要作用是放大器，会放大组织现有的优势和劣势；AI 与吞吐量正相关、与交付稳定性负相关。
@@ -347,11 +380,15 @@ GitClear 分析了 2020 到 2024 年的 2.11 亿行代码变更，在 AI 普及�
 [^3]: [AI Copilot Code Quality 2025 — GitClear](https://www.gitclear.com/ai_assistant_code_quality_2025_research)（行业研究，2025）：2.11 亿行变更实证，克隆约 4 倍、重构占比 25%→<10%、克隆占比 8.3%→12.3%、短期 churn 上升。
 [^4]: [Developer productivity with Dr. Nicole Forsgren — Pragmatic Engineer](https://newsletter.pragmaticengineer.com/p/developer-productivity-with-dr-nicole)（社区权威）：任何单一产出指标一旦被考核就会被专门优化，一组指标比单个指标更能反映全局。
 [^5]: [Monitoring — Claude Code Docs](https://code.claude.com/docs/en/monitoring-usage)（官方，2026-08-03 核对）：OTel 指标清单；`lines_of_code.count` 官方说明只是「增删的代码行数」，未被定位成生产力指标；`cost.usage` 标注为近似值。
+[^6]: [Faros AI: The AI Software Engineering Productivity Paradox](https://www.faros.ai/blog/ai-software-engineering) / [DX: How to measure AI impact](https://getdx.com/blog/measure-ai-impact/)（厂商研究，2026）：AI 编码工具的真实吞吐提升约 7.8%；生产环境在用的 AI 加权效能指标一律规定只在团队级聚合、只与本人历史基线纵向比、禁止跨人比较。厂商自有数据，未见独立复现。
+[^7]: [DORA Report 2024](https://dora.dev/research/2024/dora-report/)（行业权威，2024）：AI 采用度每提高 25%，吞吐量下降 1.5%、交付稳定性下降 7.2%，归因于变更批量变大。
+[^8]: [METR: Measuring the Impact of Early-2025 AI on Experienced Open-Source Developer Productivity](https://arxiv.org/pdf/2507.09089)（学术，2025）：16 名资深开发者、246 个真实任务，自评提速 20%、实测慢 19%；作者标注场景对 AI 不利（资深人 + 极熟悉的成熟大库）。
+[^9]: 个人研究整理（2026-07，AI 时代研发效能度量与绩效评估）：四个把 AI 用量挂上奖惩后翻车的公开案例，原始报道见「参考资料」中的 token maximizing 一条与各案例公开报道。均为二手转述，未见涉事公司官方确认。
 
 ---
 
 <sub>难度 高级 · 决策题 + 配置题 · 主线 Claude Code，横向 DORA / SPACE / DX Core 4 · 面向团队负责人与 Tech Lead，被度量方看「怎么做」第零步</sub>
 
-<sub>**时效**：Claude Code 遥测的环境变量名、指标名与属性名已于 2026-08-03 逐项对照官方 monitoring 文档核实；框架结论引自 2025 DORA 报告。**已知不确定**：第三步表里的「吞吐涨 ≥20%」是本篇给的起步值，三份框架材料均未公布绝对阈值。**易变**：DORA 已于 2026-04 发布后续报告《ROI of AI-assisted Software Development》，提出 "instability tax"，方向与本篇一致但数字会更新；OTel 指标名随 Claude Code 版本变化，配置前回查 monitoring 文档。</sub>
+<sub>**时效**：Claude Code 遥测的环境变量名、指标名与属性名已于 2026-08-03 逐项对照官方 monitoring 文档核实；框架结论引自 2025 DORA 报告。DORA 2024、METR、DX/Faros 三组数字与四个翻车案例于 2026-08-04 从一手研究笔记录入。**已知不确定**：第三步表里的「吞吐涨 ≥20%」是个人假设的起步值，三份框架材料均未公布绝对阈值；「真实吞吐提升约 7.8%」是效能厂商自有数据、未见独立复现；METR 只有 16 名开发者、246 个任务，且场景对 AI 不利；四个翻车案例均为公开报道的二手转述，未见涉事公司官方确认。**易变**：DORA 已于 2026-04 发布后续报告《ROI of AI-assisted Software Development》，提出 "instability tax"，方向与本篇一致但数字会更新；OTel 指标名随 Claude Code 版本变化，配置前回查 monitoring 文档。</sub>
 
 > 本篇个人实践（L4）：`[待补：BOSS 的实战经验/踩坑]`

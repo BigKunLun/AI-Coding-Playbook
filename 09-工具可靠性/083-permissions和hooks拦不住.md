@@ -41,6 +41,31 @@ git 层的具体禁令清单见 [#052 怎么不让 AI 把 git 仓库搞乱？](.
 
 权限规则**跨作用域合并而不是覆盖**，且任何一层 deny 了其他层都不能再 allow[^1]。所以 deny 写在哪一层都会生效；写了不生效通常是文件路径或 JSON 语法错了——`/permissions` 里看不到它，就是没加载。
 
+<details>
+
+<summary>settings 一共五层，哪层压哪层、什么字段覆盖什么字段拼接</summary>
+
+优先级从高到低：**Managed > CLI 参数 > Local > Project > User**[^7]。
+
+| 层级 | 路径 | 对谁生效 | 进 git |
+|---|---|---|---|
+| Managed | macOS `/Library/Application Support/ClaudeCode/managed-settings.json`；Linux `/etc/claude-code/`；Windows `C:\Program Files\ClaudeCode\` | 整台机器 / 整个组织，覆盖不了 | 由 IT 部署 |
+| CLI 参数 | `--settings` 等 | 仅本次会话 | — |
+| Local | `.claude/settings.local.json` | 只有自己、只在该仓库 | 否（自动 gitignore） |
+| Project | `.claude/settings.json` | 该仓库所有协作者 | 是 |
+| User | `~/.claude/settings.json` | 自己，跨所有项目 | 否 |
+
+Managed 有三种交付方式（远程下发、MDM 策略、本地文件），**取其中一个源，不做合并**。
+
+合并语义分两种，混淆它们是「我明明写了却没生效」的第二大来源：
+
+- **标量字段**（`model`、`cleanupPeriodDays` 这类）是高优先级覆盖低优先级，只有一个值活下来。
+- **`permissions` 的 allow / ask / deny 是跨层拼接**，五层的条目全都进最终清单。所以你在 user settings 里写的 deny，不会因为项目里写了 allow 就被抵消——**任意一层 deny，其他任何层都 allow 不回来**，这也是团队红线要往 managed 里放的根据。
+
+还有个和 CLAUDE.md 容易搞反的点：settings.json **不向父目录回溯**。从父目录启动，读不到子项目的 `.claude/settings.json`——那是「不回溯」，不是「不叠加」，五层之间该合并照样合并。
+
+</details>
+
 ### 第 2 步：修规则写法，覆盖真实变体
 
 ```json
@@ -59,7 +84,9 @@ git 层的具体禁令清单见 [#052 怎么不让 AI 把 git 仓库搞乱？](.
 四个写法要点，都对应上面踩过的坑：
 
 - `*` 前有空格（`Bash(rm *)`）会强制词边界，只匹配 `rm ` 开头或 `rm` 本身；没空格（`Bash(rm*)`）连 `rmdir` 一起匹配。
-- `:*` 只在模式**结尾**才被识别为通配，写在中间（`Bash(git:* push)`）里的冒号是字面字符。
+- `:*` 只在模式**结尾**才被识别为通配，写在中间（`Bash(git:* push)`）里的冒号是字面字符。官方示例里的规范写法就是尾部通配（`Bash(npm run test:*)`），语义是「以这段开头的命令」；其他工具各有自己的参数形式：`Read(./.env)` 按路径、`WebFetch(domain:example.com)` 按域名、`mcp__puppeteer__*` 是某个 MCP server 的全部工具、`Agent(Explore)` 是某个 subagent[^7]。
+- **三类规则的评估顺序固定是 deny → ask → allow，第一个匹配上的直接定结果**，规则写得多具体都不改变这个顺序。所以别指望用一条更精确的 allow 去「例外掉」一条宽泛的 deny，做不到。
+- 想把某个工具彻底关掉，deny 里写**裸工具名**（如 `"Bash"`）——它不是「每次拦一下」，而是把该工具从 Claude 的上下文里整个移除，模型根本看不到它存在。
 - 全路径变体（`/bin/rm`、`/usr/bin/rm`）要单独写，前缀不同不会自动覆盖。
 - Write / NotebookEdit / Glob 上写路径规则**无效**：只有 `Edit(path)` 和 `Read(path)` 参与文件权限检查，写成 `Write(docs/**)` 会被接受但永不生效。
 
@@ -347,7 +374,7 @@ Read / Edit 的 deny 规则边界一样，官方带 Warning 标注：它们作�
 - [Claude Code Docs: Configure permissions](https://code.claude.com/docs/en/permissions) —— 支撑「按字面串匹配、通配符空格边界、wrapper 剥离列表、复合命令拆分、deny 跨作用域合并、hook exit 2 先于权限规则」（官方，2026-08）
 - [Claude Code Docs: Hooks reference](https://code.claude.com/docs/en/hooks) —— 支撑 PreToolUse 输入 JSON、退出码语义、`permissionDecision` 取值、`if` 字段（官方，2026-08）
 - [Claude Code Docs: Configure the sandboxed Bash tool](https://code.claude.com/docs/en/sandboxing) —— 支撑 sandbox 默认读写边界、credentials 保护、平台支持与安全限制（官方，2026-08）
-- [Claude Code Docs: Settings](https://code.claude.com/docs/en/settings) —— 支撑 settings 优先级、managed settings 不可被覆盖、`allowManagedPermissionRulesOnly`（官方，2026-08）
+- [Claude Code Docs: Settings](https://code.claude.com/docs/en/settings) —— 支撑 settings 五层优先级与路径、Managed 三种交付、标量覆盖 vs permissions 拼接、不向父目录回溯、managed settings 不可被覆盖、`allowManagedPermissionRulesOnly`（官方，2026-08；五层与合并语义部分为个人研究整理，2026-07-09 按 v2.1.203 核实）
 - [GH #28240](https://github.com/anthropics/claude-code/issues/28240) —— 支撑「复合命令授权项指错成 `cd:*`」的 regression（社区，2026-02 报告，截至 2026-08 仍 open）
 - [GH #16561](https://github.com/anthropics/claude-code/issues/16561) —— 支撑「早期版本按整串匹配复合命令导致误弹窗」（社区，2026）
 - [GH #73125](https://github.com/anthropics/claude-code/issues/73125) —— 支撑「`AskUserQuestion` 60 秒超时自动继续」（社区，2026，已关闭）
@@ -358,11 +385,12 @@ Read / Edit 的 deny 规则边界一样，官方带 Warning 标注：它们作�
 [^4]: [GH #16561](https://github.com/anthropics/claude-code/issues/16561) 与 [GH #28240](https://github.com/anthropics/claude-code/issues/28240)（社区，2026）：复合命令匹配的两个方向相反的实现问题。
 [^5]: [GH #73125](https://github.com/anthropics/claude-code/issues/73125)（社区，2026，已关闭）：`AskUserQuestion` 在终端失焦时 60 秒无应答自动继续。
 [^6]: [Claude Code Docs: Hooks reference](https://code.claude.com/docs/en/hooks)（官方，2026-08）：Stop / SubagentStop 接受 `hookSpecificOutput.additionalContext` 作为非报错反馈并让对话继续；hook `type` 包含 `command` / `http` / `mcp_tool` / `prompt` / `agent`，`prompt` 默认超时 30 秒、`agent` 默认 60 秒且标注为实验性；`$ARGUMENTS` 占位 hook 输入 JSON。
+[^7]: [Claude Code Docs: Settings](https://code.claude.com/docs/en/settings) 与 [Configure permissions](https://code.claude.com/docs/en/permissions)（官方，个人研究整理，2026-07-09 按 v2.1.203 逐项核实）：五层优先级 Managed > CLI 参数 > Local > Project > User；Managed 三种交付取一个源不合并；标量字段覆盖、`permissions` 三类清单跨层拼接、任一层 deny 其他层不可 allow；评估顺序 deny → ask → allow；settings.json 不向父目录回溯；工具规则的参数形式与裸工具名 deny 的语义。
 
 ---
 
 <sub>难度 中级 · 排错题 · 主线 Claude Code</sub>
 
-<sub>**时效**：permissions / hooks / sandboxing / settings 四页的规则语义、退出码、沙箱边界已于 2026-08-04 逐项核实；Stop / SubagentStop 的 `hookSpecificOutput.additionalContext`、五种 hook `type`（command / http / mcp_tool / prompt / agent）及其默认超时同日核实于 hooks 页。**已知不确定**：skill 被模型调起时在 PreToolUse 里的确切 `tool_name`，官方 hooks 文档未列举，本篇让读者先跑日志实测；`AskUserQuestion` 超时行为改为默认关闭的具体版本号，issue 里 assignee 的说法与官方发布说明未能对齐，本篇不写死版本号；GH issue 的 👍 数为当时快照。**易变**：折叠块里的版本相关行为表（v2.1.198 / v2.1.208 / v2.1.210 / v2.1.216）随版本更新即失效，wrapper 剥离列表也可能随版本调整，照做前先跑 `claude --verbose` 用实际命令串复核。</sub>
+<sub>**时效**：permissions / hooks / sandboxing / settings 四页的规则语义、退出码、沙箱边界已于 2026-08-04 逐项核实；Stop / SubagentStop 的 `hookSpecificOutput.additionalContext`、五种 hook `type`（command / http / mcp_tool / prompt / agent）及其默认超时同日核实于 hooks 页；settings 五层优先级与路径、`permissions` 跨层拼接语义、deny → ask → allow 评估顺序、裸工具名 deny、不向父目录回溯，来自个人研究整理，按 v2.1.203 于 2026-07-09 核实。**已知不确定**：skill 被模型调起时在 PreToolUse 里的确切 `tool_name`，官方 hooks 文档未列举，本篇让读者先跑日志实测；`AskUserQuestion` 超时行为改为默认关闭的具体版本号，issue 里 assignee 的说法与官方发布说明未能对齐，本篇不写死版本号；GH issue 的 👍 数为当时快照。**易变**：折叠块里的版本相关行为表（v2.1.198 / v2.1.208 / v2.1.210 / v2.1.216）随版本更新即失效，wrapper 剥离列表也可能随版本调整，照做前先跑 `claude --verbose` 用实际命令串复核。</sub>
 
 > 本篇个人实践（L4）：`[待补：BOSS 的实战经验/踩坑]`

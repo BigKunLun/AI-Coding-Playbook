@@ -31,6 +31,8 @@ flowchart TD
 
 **怎么确认没被拆**：看 API 响应 `usage` 里的 `cache_read_input_tokens`（这次命中读取）和 `cache_creation_input_tokens`（这次写入）；或者跑 `npx ccusage@latest daily` 看 cache read 分列。正常的长会话里 cache read 应该占输入 token 的大头，社区实测的重度用户能到 88.8%[^5]；掉到 60% 以下就该回头查上面三个动作。
 
+注意 ccusage 的口径限制：它读的是本地 `~/.claude` 下的 jsonl 会话日志，而这份日志记的 token 绝对数会被系统性少算 1–2 个数量级[^6]。所以上面这条只看比例和趋势——cache read 占比、以及这周比上周高还是低——别拿它的 token 绝对值去对账单。
+
 **2. 少挂 MCP。** MCP 工具定义默认延迟加载（只有工具名进上下文，用到时才载入完整 schema），但仍然是开销。官方建议：能用命令行工具（`gh`、`aws`、`gcloud`）就别用 MCP，因为 CLI 不占工具列表。用 `/mcp` 看已配置的，停掉没在用的。
 
 **3. 把 CLAUDE.md 精简到 200 行以内。** 原则：Claude 能从读代码推断出来的，删掉；专项工作流指令（PR 审查清单、DB 迁移步骤）下沉到 skills 按需加载[^3]。写法见 [#010 CLAUDE.md 怎么写才真的生效](../02-上下文工程/010-CLAUDE-md怎么写才生效.md)。
@@ -84,8 +86,15 @@ flowchart TD
 #!/bin/bash
 input=$(cat); cmd=$(echo "$input" | jq -r '.tool_input.command')
 if [[ "$cmd" =~ ^(npm test|pytest|go test) ]]; then
-  filtered="$cmd 2>&1 | grep -A 5 -E '(FAIL|ERROR|error:)' | head -100"
-  echo "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"allow\",\"updatedInput\":{\"command\":\"$filtered\"}}}"
+  # 用 jq 生成 JSON，不要用字符串拼接 —— 命令里一旦带引号或反斜杠，
+  # 拼出来的就是非法 JSON，hook 会静默失效（不报错、不过滤）
+  jq -n --arg c "$cmd 2>&1 | grep -A 5 -E '(FAIL|ERROR|error:)' | head -100" '{
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "allow",
+      updatedInput: { command: $c }
+    }
+  }'
 else echo "{}"; fi
 ```
 
@@ -187,6 +196,7 @@ CLAUDE.md 在会话启动时就载入上下文。如果里面塞了专项工作�
 - [Memory — Claude Code Docs](https://code.claude.com/docs/en/memory) —— 支撑 `/memory` 只列位置、不显示实际加载内容这一说明（官方）
 - [firecrawl: 12 Ways to Cut Token Consumption in Claude Code](https://www.firecrawl.dev/blog/claude-code-token-efficiency) —— 支撑 CLAUDE.md 瘦身与 handoff 文件两条做法：一份约 3800 token 的 CLAUDE.md 砍到 300 出头未见质量回退（社区个例，数字未核实）
 - [HN 45914307: I spent $638 on AI coding agents in 6 weeks](https://news.ycombinator.com/item?id=45914307) —— 支撑「cache read 应占大头」的量级参考：70 天账单复盘，缓存命中率 88.8%（社区，2025-11，单人个例）
+- 《AI 使用能力的度量与认证：系统可行性与赛道判断》—— 支撑「本地 jsonl token 数被系统性少算 1–2 个数量级、只能看趋势」这条口径限制（个人研究，2026-06，未公开）
 - [V2EX 1153108](https://v2ex.com/t/1153108) / [r/ClaudeCode: It costs you around 2% session usage to say hello](https://www.reddit.com/r/ClaudeCode/comments/1s54q0d/it_costs_you_around_2_session_usage_to_say_hello/) —— 支撑「固定启动开销才是大头」的社区吐槽，两处具体数字均为单源个例、未核实（社区，2025）
 
 [^1]: [Prompt caching — Anthropic Docs](https://platform.claude.com/docs/en/build-with-claude/prompt-caching)（官方）：cache read 0.1×，cache write 5 分钟 TTL 1.25×、1 小时 TTL 2.0×。
@@ -194,11 +204,12 @@ CLAUDE.md 在会话启动时就载入上下文。如果里面塞了专项工作�
 [^3]: [Manage costs effectively — Claude Code Docs](https://code.claude.com/docs/en/costs)（官方，2026-06）：CLAUDE.md 会话启动即载入，建议把专项指令移进 skills 并把文件控制在 200 行以内。
 [^4]: 同上：官方点名的两个高开销习惯是「跨不相关任务不清空历史」和「Opus 留作默认模型」；agent teams 在 plan 模式下大约用 7 倍 token。
 [^5]: [HN 45914307](https://news.ycombinator.com/item?id=45914307)（社区，2025-11，单人个例）：70 天完整账单复盘，缓存命中率 88.8%。个例，不是官方基准。
+[^6]: 个人研究（2026-06，跨工具痕迹采集可行性评估）：Claude Code 本地 jsonl 里的 token 数被系统性少算 1–2 个数量级，只能看趋势、不能当绝对值。未见官方对该偏差的确证说明。
 
 ---
 
 <sub>难度 中级 · 流程题 + 配置题 · 主线 Claude Code，横向 Cursor / Copilot</sub>
 
-<sub>**时效**：缓存倍率（write 1.25×/2.0×、read 0.1×）、TTL 免费续期、前缀失效层级、最小可缓存前缀（Fable 5=512 / Opus 4.8=1024 / Opus 4.7=2048 / Opus 4.6=4096 等）与官方 costs 页各项策略已于 2026-07-18 对照官方文档核实。**已知不确定**：「cache read 低于 60% 该查」这条阈值是本篇按社区实测量级给的经验线，官方没有健康值标准；「一句你好吃掉 15 万 token」「hello 烧掉 2% 额度」两处数字是单源社区个例，未核实。**易变**：倍率与最小可缓存前缀属可调定价参数，随官方更新即失效，用前回查官方 prompt caching 页。</sub>
+<sub>**时效**：缓存倍率（write 1.25×/2.0×、read 0.1×）、TTL 免费续期、前缀失效层级、最小可缓存前缀（Fable 5=512 / Opus 4.8=1024 / Opus 4.7=2048 / Opus 4.6=4096 等）与官方 costs 页各项策略已于 2026-07-18 对照官方文档核实。**已知不确定**：「cache read 低于 60% 该查」这条阈值是本篇按社区实测量级给的经验线，官方没有健康值标准；「一句你好吃掉 15 万 token」「hello 烧掉 2% 额度」两处数字是单源社区个例，未核实；「本地 jsonl token 数少算 1–2 个数量级」（2026-08-04 补入）出自个人一手研究，未见官方确证，故本篇涉及 ccusage 的判断一律用比例与趋势、不用绝对值。**易变**：倍率与最小可缓存前缀属可调定价参数，随官方更新即失效，用前回查官方 prompt caching 页。</sub>
 
 > 本篇个人实践（L4）：`[待补：BOSS 的实战经验/踩坑]`

@@ -99,6 +99,14 @@ Agent Team 默认关闭，需要设 `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` 启
 
 一条经验判据：**如果你发现自己在给 SubAgent 补充它本该知道的背景，那这活就不该用 SubAgent** —— 要么改用 fork（继承上下文），要么直接留在主会话。
 
+### 第六步：核对接收端 —— 开得起，不代表你审得过来
+
+前五步定的是生成端上限（token、限流、文件冲突扛不扛得住）。还有一个独立的上限在你这边：**这些 agent 产出的东西，最后要一个人读懂并负责**。原则一句话 —— **让 AI 并发，不要让人的注意力并发**。
+
+落到数字上：回传摘要、不用你逐条审的后台调研，3~5 个没问题；但**需要你逐行读懂 diff 才能决定合不合的任务，同时只该有 1 个**（跑测试、批量改名这类只看成功失败的监工任务可以再叠 1 个）。这跟前面「编码场景 2 到 4 个」不冲突：那 4 个是同时在跑的生成上限，而且通常各改各的文件、最后汇成一份要你读的改动；一旦它们变成 4 份彼此独立、都得你逐行读懂的 diff，堵的就是你，不是模型。派活前先问一句：它们回来的是摘要，还是四份等我审的 diff。
+
+分层上限的完整推理链、超载的可观测信号，以及降低单次审查量的做法，见 [005 篇](../01-心智与工具/005-审查疲劳与心流.md)。
+
 <details>
 <summary>三种调用方式与三个内置 SubAgent</summary>
 
@@ -336,6 +344,7 @@ Anthropic 在自家多 Agent 研究系统的复盘里给了最硬的量化：age
 
 **相关文章**
 
+- [#005 AI 写得比我读得快，我一天到晚在审代码——怎么把节奏和心流拿回来？](../01-心智与工具/005-审查疲劳与心流.md) —— 接收端的上限：并行开出来的产出谁来审、分层 WIP 怎么定
 - [#031 让 AI 改一个小功能，它却动了一堆无关文件怎么办？](./031-plan-execute-review循环.md) —— 对抗式 review 的 SubAgent 用法，Phase ④ 的核心机制
 - [#012 上下文窗口要爆了怎么办？](../02-上下文工程/012-上下文窗口要爆了.md) —— SubAgent 是最高效的防爆手段；transcript 抗 compact
 - [#030 AI 写的测试一跑就过、还偷偷删测试怎么办？](./030-AI写的测试不可信.md) —— 「写测试的人 ≠ 写实现的人」就是 SubAgent 的应用
@@ -371,6 +380,6 @@ Anthropic 在自家多 Agent 研究系统的复盘里给了最硬的量化：age
 
 <sub>难度 高级 · 决策题 · 主线 Claude Code，横向 Cursor / Copilot</sub>
 
-<sub>**时效**：版本相关事实（Explore 自 v2.1.198 起继承主会话模型且在 Claude API 上封顶 Opus、agent frontmatter 支持的字段清单、fork 自 v2.1.212 起命令改名为 `/subtask`、Explore/Plan 跳过 CLAUDE.md 与 git status、项目级 frontmatter hook 自 v2.1.218 起需 workspace trust）已于 2026-08-03 对照官方 sub-agents 文档逐项复核。**已知不确定**：48 个 agent 扇出、13%–22% idle token、约 350 万 token 零产出三个案例均来自 GitHub issue，属社区单点实测，未见官方确认；第五步「差值 ≤ 5 个百分点」是本篇给的经验阈值，不是官方数字；并行/串行/后台路由表出自社区站点整理。**易变**：Claude Code 版本号类细节迭代快，fork 命令名与 agent frontmatter 字段清单用前回查官方文档。</sub>
+<sub>**时效**：版本相关事实（Explore 自 v2.1.198 起继承主会话模型且在 Claude API 上封顶 Opus、agent frontmatter 支持的字段清单、fork 自 v2.1.212 起命令改名为 `/subtask`、Explore/Plan 跳过 CLAUDE.md 与 git status、项目级 frontmatter hook 自 v2.1.218 起需 workspace trust）已于 2026-08-03 对照官方 sub-agents 文档逐项复核。**已知不确定**：48 个 agent 扇出、13%–22% idle token、约 350 万 token 零产出三个案例均来自 GitHub issue，属社区单点实测，未见官方确认；第五步「差值 ≤ 5 个百分点」是本篇给的经验阈值，不是官方数字；第六步的接收端上限（深度审读同时 1 个、后台调研 3~5 个）出自个人实践，推理链见 005 篇；并行/串行/后台路由表出自社区站点整理。**易变**：Claude Code 版本号类细节迭代快，fork 命令名与 agent frontmatter 字段清单用前回查官方文档。</sub>
 
 > 本篇个人实践（L4）：`[待补：BOSS 的实战经验——你哪次用 SubAgent 救了爆掉的上下文 / 或反过来多 Agent 烧了 15 倍 token 却没拿到收益的踩坑案例]`

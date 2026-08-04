@@ -155,7 +155,7 @@ paths: apps/web/**/*.{ts,tsx}
 3. 把请求改得更贴近 description 再试一次。
 4. 如果是 user-invocable，直接 `/skill-name` 手动触发看正文是否正常。
 5. frontmatter 的 YAML 坏了会导致 metadata 为空 —— 症状是 `/name` 还能用但自动触发失效，跑 `--debug` 看解析错误。
-6. description 预算溢出：装太多 skill 时描述会被截断、丢掉关键词。跑 `/doctor` 看哪些被截断，用 `skillListingBudgetFraction` 调高预算，或把低优先级 skill 设成 `"name-only"`。
+6. description 预算溢出：装太多 skill 时描述会被截断、丢掉关键词。先跑 `/context`，看 skill 分项里有没有你这个 skill —— **不在列表里就是被预算挤出去了，改多少遍 description 都没用**。再跑 `/doctor` 看哪些被截断，然后用 `skillListingBudgetFraction` 调高预算，或把低优先级 skill 设成 `"name-only"`。
 
 触发太频繁时：description 写得更具体，或加 `disable-model-invocation: true` 改成纯手动。
 
@@ -231,11 +231,18 @@ skill 不是「又一种 prompt」，而是把人类专家的流程化经验打�
 
 | 层级 | 何时加载 | 大小 |
 |------|---------|------|
-| **第 1 层**：`name` + `description` frontmatter | 启动时预加载进每个会话的 system prompt | ~100 tokens / skill |
+| **第 1 层**：`name` + `description` frontmatter | 启动时预加载进每个会话的 system prompt | 官方给约 100 tokens / skill；官方 skill 实测中位约 80，最大 235 |
 | **第 2 层**：`SKILL.md` 正文 | Claude 判断「相关」时才读进来 | 通常 <500 行（<5k tokens） |
 | **第 3 层**：附属文件（reference.md / scripts/） | 正文指向它、且当前任务真需要时才读 | 无上限 |
 
 这也解释了 skill 和 CLAUDE.md 的根本区别：CLAUDE.md 是常驻税，每一轮对话都占 token；skill 是按需调用，不用就不花 token[^2]。
+
+**算笔账，才知道「装多少个开始有代价」。** 只有第 1 层是常驻成本：Anthropic 17 个官方 skill 实测，发现层中位约 80 tokens 一个，最小 55（webapp-testing），最大 235（xlsx）[^6]。照中位算，装 100 个 skill 的常驻开销约 1 万 tokens —— 200K 窗口的 5%。作为对照，一个 GitHub MCP server 暴露 90 多个工具，光 JSON schema 就 5 万多 tokens[^6]，还没开始推理。同样是「给 Claude 加能力」，量级差 5 倍。
+
+所以答案不是「skill 越少越好」，而是：**几十个 skill 完全不用心疼，真正会咬人的是 description 写太长和装了一堆常驻 MCP。** 两个能直接照做的动作：
+
+- description 控制在两三行 —— 它是唯一进常驻预算的部分，写长了不只多花 token，还会挤掉别的 skill 的描述。
+- 常驻成本超预算时，先砍 MCP 再砍 skill。判据见 [006 篇](../01-心智与工具/006-MCP装哪些不装哪些.md)。注意新版 Claude Code 默认开 tool search，MCP schema 会延迟加载，实际占用可能远低于 5 万，先用 `/context all` 量了再动手。
 
 ### 四种机制各管一类问题
 
@@ -323,6 +330,7 @@ skill 不是「又一种 prompt」，而是把人类专家的流程化经验打�
 - [I Watched 100+ People Hit the Same Claude Skills Problems — natesnewsletter](https://natesnewsletter.substack.com/p/i-watched-100-people-hit-the-same) —— 支撑「skill 不触发的首要原因是含糊的 description」（社区，2025-2026，单一来源，与官方排错指引方向一致）
 - [I Built 106 Claude Skills. 12 Dos and Don'ts — Medium](https://medium.com/@mohit15856/i-built-106-claude-skills-here-are-the-12-dos-and-donts-i-wish-i-d-known-earlier-8f4f13903f28) —— 支撑「坏的 description 不告诉 Claude 何时用」（社区，2025-2026）
 - [Specification — Agent Skills (agentskills.io)](https://agentskills.io/specification) —— 支撑 Agent Skills 开放标准的 SKILL.md 结构与 frontmatter 字段（社区/标准，2025-12）
+- 《Agent Skills 开放标准：从 Claude Code 功能到行业基础设施》—— 支撑发现层 token 中位数、100 个 skill 的常驻开销、与 GitHub MCP server schema 开销的对比（个人研究，2026-03）
 - [Use Agent Skills in VS Code — VS Code Docs](https://code.visualstudio.com/docs/agent-customization/agent-skills) —— 支撑跨工具可移植性（官方，2026）
 
 [^1]: [Equipping agents for the real world with Agent Skills — Anthropic](https://www.anthropic.com/engineering/equipping-agents-for-the-real-world-with-agent-skills)（官方，2025-10）：渐进披露是让 Agent Skills 灵活可扩展的核心设计原则，skill 能塞进的内容量几乎没有上限。
@@ -330,11 +338,12 @@ skill 不是「又一种 prompt」，而是把人类专家的流程化经验打�
 [^3]: [Extend Claude with skills — Claude Code Docs](https://code.claude.com/docs/en/skills)（官方，2026-06）：当你不断把同一段指令、检查清单或多步流程粘进对话，或 CLAUDE.md 某节从事实长成流程时，就该建 skill。
 [^4]: [writing-skills SKILL.md — obra/superpowers](https://github.com/obra/superpowers/blob/main/skills/writing-skills/SKILL.md)（社区/开源，2025-2026）：实测发现 agent 会把 description 里的流程摘要当捷径，直接跳过读正文。
 [^5]: [Extend Claude with skills — Claude Code Docs](https://code.claude.com/docs/en/skills)（官方，2026-06）：auto-compaction 时被调用过的 skill 重新挂载，每个保留前 5000 tokens、合计预算 25000 tokens，从最近调用的开始填。
+[^6]: 《Agent Skills 开放标准》读书笔记（个人研究，2026-03-26）：17 个官方 skill 发现层中位约 80 tokens（55–235），100 个约 1 万 tokens；一个 GitHub MCP server 暴露 90+ 工具、JSON schema 超 5 万 tokens。两组数字笔记标注引自 Anthropic 工程博客，本篇未逐字回查原文，按社区/笔记转述采用，量级与官方「约 100 tokens / skill」一致。
 
 ---
 
 <sub>难度 高级 · 配置题 · 主线 Claude Code，横向 Cursor / Copilot</sub>
 
-<sub>**时效**：机制数字（metadata 约 100 tokens、正文 <500 行、`description` 字段上限 1024 字符、`description` + `when_to_use` 合并文本 1536 字符截断、compact 重挂载每技能 5000 / 合计 25000 tokens）与 frontmatter 字段、`skillListingBudgetFraction` / `"name-only"` 设置、「custom commands 已并入 skills」，均已于 2026-07-18 对照官方 skills 文档逐项核实。**已知不确定**：「skill 不触发的首要原因是含糊 description」出自单一社区来源，方向与官方排错指引一致但无官方量化；superpowers 的 `You MUST use this...` 写法属社区取舍，与官方第三人称建议有出入。**易变**：预算类数字与 frontmatter 字段清单随 Claude Code 迭代变化，用前回查官方 skills 文档。</sub>
+<sub>**时效**：机制数字（metadata 约 100 tokens、正文 <500 行、`description` 字段上限 1024 字符、`description` + `when_to_use` 合并文本 1536 字符截断、compact 重挂载每技能 5000 / 合计 25000 tokens）与 frontmatter 字段、`skillListingBudgetFraction` / `"name-only"` 设置、「custom commands 已并入 skills」，均已于 2026-07-18 对照官方 skills 文档逐项核实。**已知不确定**：「skill 不触发的首要原因是含糊 description」出自单一社区来源，方向与官方排错指引一致但无官方量化；superpowers 的 `You MUST use this...` 写法属社区取舍，与官方第三人称建议有出入；token 经济学的三个数字（发现层中位 80、100 个约 1 万、GitHub MCP schema 5 万+）来自个人研究笔记转述 Anthropic 工程博客，未逐字回查原文。**易变**：预算类数字与 frontmatter 字段清单随 Claude Code 迭代变化，用前回查官方 skills 文档。</sub>
 
 > 本篇个人实践（L4）：`[待补：BOSS 的实战经验——你封装过哪个 skill 解决了重复流程 / 或踩过 description 写太抽象不触发的坑 / superpowers 启用前后工作流的变化]`
