@@ -11,6 +11,8 @@
 | 文件涨过 200 行后整体变差 | 砍回 200 行内，细节挪进 `.claude/rules/` | 每季度逐行过一遍，删死指令 |
 | 行为前后矛盾 | 全文贴进新会话，问「哪些指令互相冲突」 | 加新指令前先搜有没有对立的旧条 |
 | 有条规则必须 100% 执行 | 改写成 hook | 硬约束一律不进 CLAUDE.md |
+| 它顺手改了没让改的地方 | 贴一段「自缚条款」进 CLAUDE.md | 交付前让它自报改动文件数与行数 |
+| 规则越来越多、越来越死板 | 删掉说不出对应失败记录的那些 | 只为已发生过的失败加规则 |
 
 一条规则该落到哪个文件，按这张图判：
 
@@ -60,7 +62,30 @@ flowchart TD
 
 `/init` 可以用来起草，但生成完必须逐行手改。自动生成的版本常见两个毛病：啰嗦，以及夹带只在当时成立的一次性指令。
 
-### 第 3 步：超过 200 行就下沉，别硬塞
+### 第 3 步：加一段「自缚条款」限制改动范围
+
+「只让改一行，它顺手重写了整个文件」是最费时间的一类返工。事后审 diff 已经晚了，把边界写在前面更省事。下面这段可以直接粘进项目 CLAUDE.md，六行，每条都有可观测的判据。
+
+<details>
+<summary>可直接复制的自缚条款（6 行）</summary>
+
+```markdown
+## Scope discipline
+- 只改任务明确要求的代码。顺手发现的其他问题写进回复末尾的「顺带发现」列表，不要直接改。
+- 小改动用最小编辑，禁止整文件重写：改 3 行就只出现 3 行 diff。
+- 不新增没有对应需求条目的抽象层（接口、基类、工厂、配置项、插件机制）。需要抽象时先说明它服务哪条需求，等我确认。
+- 不为需求里没提的场景加错误处理、兼容分支或防御性判断。
+- 不改动测试来让代码通过；测试要改必须单独说明理由。
+- 交付前自检并在回复里报一行：本次改了几个文件、每个文件改了多少行、是否都在任务范围内。
+```
+
+**怎么确认生效**：跑一个「只改一行」的小任务，看两个信号 —— 回复末尾有没有出现那行自检（改动文件数、行数）；`git diff --stat` 的文件数是不是等于你要求的文件数。有一项对不上，说明这段没被读到，回第 1 步查加载。
+
+这段之所以能生效，是因为每条都写成了可判定的动作（「diff 里不该出现的文件数 = 0」），而不是「不要过度设计」这种没法验证的原则。范围外的改动怎么在审查阶段捞回来，见 [#041 怎么审查 AI 生成的代码](../05-质量保证/041-怎么审查AI生成的代码.md)。
+
+</details>
+
+### 第 4 步：超过 200 行就下沉，别硬塞
 
 官方建议单个 CLAUDE.md 控制在 200 行以内[^1]。超了有两条下沉路径，区别很关键：
 
@@ -81,14 +106,29 @@ flowchart TD
 
 </details>
 
-### 第 4 步：必须硬执行的，改写成 hook
+### 第 5 步：必须硬执行的，改写成 hook
 
 「提交前必须 lint」「禁止改 `migrations/`」这类不容打折的约束，写进 CLAUDE.md 只是行为引导，写成 `PreToolUse` / `Stop` hook（在特定动作前后自动触发的脚本）才是硬执行。hook 是代码，不参与模型判断，也不占上下文。
 
-### 第 5 步：定期清矛盾、清死指令
+### 第 6 步：定好「怎么增、怎么减」
 
-- **查矛盾**：把整份 CLAUDE.md 贴进一个新会话，问「哪些指令互相冲突？」。Claude 很擅长找出自己被喂的矛盾指令。
-- **清死指令**：每季度逐行问「这条现在还成立吗？」，删掉指向已删除脚本的命令、已重构掉的目录路径。判据很硬：命令跑不通、路径 `ls` 不存在，就删。
+CLAUDE.md 是要长期维护的，加法和减法都得有明确闸门，否则一年后它会变成一份没人敢动、也没人真在遵守的长文档。
+
+**怎么增：只为已经发生过的失败加规则。** 官方给的触发条件很具体 —— Claude 第二次犯同一个错、code review 抓到一个它本该知道的项目约定、你这次又在聊天里敲了上次敲过的同一句纠正[^5]。三条都是「已经发生过」。反过来，「万一它以后……」这种假想边界不加规则，Copilot 官方的元规范把这种膨胀单独列成反模式[^6]。
+
+落地成一个动作：建一个 `docs/ai-misses.md`（或 issue label），每次跑偏就记一行「日期 + 现象 + 当时的任务」。**同一条现象记到第 2 次，才允许往 CLAUDE.md 加规则**，并在规则后面用 HTML 注释挂上出处，比如 `<!-- 2026-07-02, 2026-07-15 两次把 handler 写进 src/utils -->`。块级 HTML 注释在注入前会被剥掉，不占 token[^7]。
+
+**怎么减：三条判据，命中就删。**
+
+| 判据 | 怎么看出来 | 动作 |
+|---|---|---|
+| 死指令 | 命令跑不通、路径 `ls` 不存在 | 直接删 |
+| 无出处的规则 | 规则后面没有失败记录的注释，且没人说得出它当初为什么加 | 删，等它再犯一次再加回来 |
+| 被反复手动豁免 | 同一条规则你在会话里说过 3 次「这次不用管它」 | 改写成带条件的表述，或降级到 `.claude/rules/` |
+
+节奏上每季度过一遍即可。另外 `/doctor` 自带一项 CLAUDE.md 瘦身检查：它会提议砍掉 Claude 能自己从代码库看出来的内容（目录结构、依赖清单、架构概览），保留坑点、理由和与工具默认不同的约定；需要 Claude Code v2.1.206 及以上[^8]。
+
+**查矛盾**：把整份 CLAUDE.md 贴进一个新会话，问「哪些指令互相冲突？」。Claude 很擅长找出自己被喂的矛盾指令。官方也明说两条规则打架时它会**任选一条**，所以矛盾不是「偶尔出错」，是行为直接变得不可预测[^2]。
 
 <details>
 <summary>一份合格的项目级 CLAUDE.md（不到 60 行的完整示例）</summary>
@@ -146,8 +186,8 @@ flowchart TD
 
 - ❌ **把 CLAUDE.md 当 linter。** 代码风格细则交给 Biome / ESLint / Prettier，再挂 Stop hook 自动修复。让大模型当 linter 又慢又贵，还占上下文。
 - ❌ **`/init` 生成后一行不改。** 自动生成的版本啰嗦且夹带一次性指令，而 CLAUDE.md 影响每个工作流阶段，一行错指令会被放大成大量错代码。
-- ❌ **无限堆叠，从不删除。** 超过官方建议的 200 行后遵守率明显下降；架构重构了文件却没更新时，Claude 会自信地往不存在的目录里写文件。
-- ❌ **写矛盾指令。** 「永远用 async/await」和「工具目录用 .then()」同时存在，行为就变得不可预测。定期贴进新会话查一遍冲突。
+- ❌ **无限堆叠、从不删除，于是攒出一堆矛盾指令。** 超过官方建议的 200 行后遵守率明显下降；架构重构了文件却没更新时，Claude 会自信地往不存在的目录里写文件。堆久了还会出现「永远用 async/await」和「工具目录用 .then()」并存这种矛盾，行为直接变得不可预测。按第 6 步定期做减法、查冲突。
+- ❌ **规则写太死。** 满篇 NEVER / ALWAYS，边缘情况上它会宁可机械硬套也不变通：比如「禁止用 `any`」逼出十几行类型体操来替代一句合理的断言，或者它在回复里明说「规则不让我 X，所以我改用 Y」而 Y 明显更绕。三个可观测信号 —— 出现上面这类绕远的实现；规则条数在涨但你说不出每条对应哪次真实失败；同一条规则你在会话里连着 3 次手动豁免。硬规则只留给真出过事的那几条，其余写成带条件的表述（「默认 X；确有必要用 Y 时先说明理由」）。
 - ❌ **指望它强制执行。** 「提交前必须跑测试」要万无一失就写 hook。CLAUDE.md 是行为引导，hook 才是硬执行层。
 
 <details>
@@ -177,7 +217,8 @@ flowchart TD
 
 **参考资料**
 
-- [How Claude remembers your project — Claude Code Docs](https://code.claude.com/docs/en/memory) —— 支撑本篇的层级加载表、200 行建议、`/context` 排查顺序、compact 后的重新注入规则（官方，2026-06）
+- [How Claude remembers your project — Claude Code Docs](https://code.claude.com/docs/en/memory) —— 支撑本篇的层级加载表、200 行建议、`/context` 排查顺序、compact 后的重新注入规则、加规则的四个时机、HTML 注释不占 token、`/doctor` 瘦身检查（官方，2026-08 复核）
+- [github/awesome-copilot: instructions.instructions.md](https://github.com/github/awesome-copilot/blob/main/instructions/instructions.instructions.md) —— 支撑「不为假想边界加规则」这条反模式（GitHub 官方仓库，2026-08）
 - [Writing a good CLAUDE.md — HumanLayer Blog](https://www.humanlayer.dev/blog/writing-a-good-claude-md) —— 支撑「指令跟随均匀衰减」「系统提示已占约 50 条」「必须逐行手改而非 `/init` 直接用」（社区权威，2025-11）
 - [Why your CLAUDE.md stops working — aicodex.to](https://www.aicodex.to/articles/claude-md-maintenance) —— 支撑「无限堆叠、从不删除」这条反模式与季度审计习惯（社区，2026-04）
 - [Claude Code Memory Explained — Jose Parreño Garcia](https://joseparreogarcia.substack.com/p/claude-code-memory-explained) —— 支撑「层级是拼接不是覆盖」的心智模型（社区，2026-02）
@@ -191,11 +232,15 @@ flowchart TD
 [^2]: [Claude Code Docs: Troubleshoot memory issues](https://code.claude.com/docs/en/memory)（官方，2026-06）：CLAUDE.md 以系统提示之后的一条用户消息投递，不保证严格遵守，模糊或冲突指令尤甚。
 [^3]: [This is why Claude Code sometimes ignores your claude.md — r/ClaudeAI](https://www.reddit.com/r/ClaudeAI/comments/1ldugmg/this_is_why_claude_code_sometimes_ignore_your/)（社区，2025-05）：揭示附加在 CLAUDE.md 之后的 `important-instruction-reminders` 段落；HumanLayer 通过抓取 `ANTHROPIC_BASE_URL` 请求独立验证了同样的注入顺序。
 [^4]: [Writing a good CLAUDE.md — HumanLayer Blog](https://www.humanlayer.dev/blog/writing-a-good-claude-md)（社区权威，2025-11）：前沿推理模型可稳定跟随约 150–200 条指令，超出后遵循质量均匀下降，Claude Code 系统提示已占约 50 条。
+[^5]: [Claude Code Docs: When to add to CLAUDE.md](https://code.claude.com/docs/en/memory)（官方，2026-08）：给出四个添加时机 —— Claude 第二次犯同一个错、code review 抓到它本该知道的项目知识、你重复敲同一句纠正、新同事需要同样的上下文。
+[^6]: [github/awesome-copilot: instructions.instructions.md](https://github.com/github/awesome-copilot/blob/main/instructions/instructions.instructions.md)（GitHub 官方仓库，2026-08 核实）：把 "Hypothetical-rule inflation: Do not add rules for failures that have not occurred" 列为编写指令文件的反模式。
+[^7]: [Claude Code Docs: How CLAUDE.md files load](https://code.claude.com/docs/en/memory)（官方，2026-08）：CLAUDE.md 中的块级 HTML 注释在注入上下文前被剥除，可用于给人类维护者留注记而不消耗 token。
+[^8]: [Claude Code Docs: My CLAUDE.md is too large](https://code.claude.com/docs/en/memory)（官方，2026-08）：`/doctor` 会为已提交的 CLAUDE.md 提出瘦身建议，砍掉可从代码库推导的内容、保留坑点与非默认约定；该检查需 v2.1.206 及以上。
 
 ---
 
 <sub>难度 中级 · 配置题 · 主线 Claude Code，横向 Cursor / Copilot / Cline</sub>
 
-<sub>**时效**：注入机制（以 user message 形式投递、不保证严格遵守）、200 行建议、四层加载顺序、`/context` 与 `/memory` 分工，已于 2026-07-18 对照官方 memory 文档核实。**已知不确定**：「150–200 条指令」「系统提示占约 50 条」「优化 rules 提升准确率 10–15%」均为社区单源，未见官方确证；300 行上限是社区流行说法，本篇统一按官方的 200 行给行动阈值。**易变**：第三方工具（Cursor `.mdc`、Copilot、Cline）的规则文件机制迭代快，落地前查各家官方文档。</sub>
+<sub>**时效**：注入机制（以 user message 形式投递、不保证严格遵守）、200 行建议、四层加载顺序、`/context` 与 `/memory` 分工，已于 2026-07-18 对照官方 memory 文档核实；「第二次犯同一个错才加规则」「矛盾规则会被任选一条」「块级 HTML 注释不占 token」「`/doctor` 的 CLAUDE.md 瘦身检查（需 v2.1.206+）」于 2026-08-04 对照同一份官方文档核实。**已知不确定**：「150–200 条指令」「系统提示占约 50 条」「优化 rules 提升准确率 10–15%」均为社区单源，未见官方确证；「自缚条款」这一整段片段的具体措辞、以及「同一现象记满 2 次才加规则」「同一条规则豁免 3 次就改写」的阈值，都是实践约定而非官方或实测结论，按自己的节奏调；300 行上限是社区流行说法，本篇统一按官方的 200 行给行动阈值。**易变**：第三方工具（Cursor `.mdc`、Copilot、Cline）的规则文件机制迭代快，落地前查各家官方文档。</sub>
 
 > 本篇个人实践（L4）：`[待补：BOSS 的实战经验/踩坑]`

@@ -7,7 +7,7 @@
 **沿开发全链路分层的人机协作指南 —— 每个环节该怎么跟 AI 配合、会撞上什么问题、遇到了怎么解决。**
 
 <img src="https://img.shields.io/badge/主线-Claude_Code-green?style=flat-square" />
-<img src="https://img.shields.io/badge/文章-37_篇-orange?style=flat-square" />
+<img src="https://img.shields.io/badge/文章-39_篇-orange?style=flat-square" />
 <img src="https://img.shields.io/badge/结构-9_层能力栈-blue?style=flat-square" />
 <img src="https://img.shields.io/badge/语言-中文-red?style=flat-square" />
 <img src="https://img.shields.io/badge/许可证-MIT-purple?style=flat-square" />
@@ -165,6 +165,7 @@ flowchart BT
 | 003 | [为什么 AI 写的代码我审不动、改完自己看不懂？](01-心智与工具/003-AI代码审不动改不懂.md) |
 | 004 | [CLAUDE.md、skill、subagent、hooks、plan mode——这几个到底该用哪个？](01-心智与工具/004-Claude-Code能力地图.md) |
 | 005 | [AI 写得比我读得快，我一天到晚在审代码——怎么把节奏和心流拿回来？](01-心智与工具/005-审查疲劳与心流.md) |
+| 006 | [装了一堆 MCP 之后卡顿、上下文被吃掉，到底该留哪些？](01-心智与工具/006-MCP装哪些不装哪些.md) |
 
 </details>
 
@@ -214,6 +215,7 @@ flowchart BT
 | 042 | [AI 写的方法不存在、pip install 报 404、API 参数对不上——幻觉 API 和幻觉依赖怎么查、怎么防？](05-质量保证/042-幻觉API与幻觉依赖.md) |
 | 043 | [AI 改不对 bug、陷入 fix loop / 越改越糟，什么时候必须停、怎么跳出？](05-质量保证/043-fix-loop什么时候必须停.md) |
 | 044 | [AI 写的代码上线三个月，300 行的函数没人敢动——怎么分批还债？](05-质量保证/044-AI代码债怎么分批还.md) |
+| 045 | [AI 把样式改完了，怎么知道界面没崩？](05-质量保证/045-AI改的界面怎么验证.md) |
 
 </details>
 

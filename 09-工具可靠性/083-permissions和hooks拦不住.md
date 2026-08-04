@@ -12,6 +12,7 @@
 | 你写的规则在 `/permissions` 里根本看不到 | 文件路径或 JSON 写错了，规则压根没加载 | 改完立刻用一条危险命令验收 |
 | 这个动作必须 100% 拦死，不接受「弹窗让人确认」 | 写 PreToolUse hook，`exit 2` | 把 `"Bash"` 放 allow，用 hook 拒那几条 |
 | 团队机器，开发者能自己改配置 | managed settings + `allowManagedPermissionRulesOnly` | 顺手禁掉 `--dangerously-skip-permissions` |
+| 它总是漏做收尾检查（测试、CHANGELOG） | Stop hook 注入 `additionalContext`，不用 block | 见第 6 步「hook 的三个正面用法」 |
 
 ```mermaid
 flowchart TD
@@ -213,6 +214,84 @@ managed settings（企业侧，优先级最高）：
 
 </details>
 
+### 第 6 步：hook 的三个正面用法
+
+前五步都在讲「拦住」。hook 还有另一半价值：把「我记得去查」的人工检查变成它每轮必须自己做。这一半不阻断任何东西，风险低，值得先上。
+
+**① Stop hook 做完成度判定，用 `additionalContext` 注入反馈，别用 block。**
+
+老写法返回 `{"decision":"block"}` 逼它继续干，会以「hook 报错」的形式呈现且官方对连续 block 有硬上限；改用 `hookSpecificOutput.additionalContext`，官方明写 Stop 与 SubagentStop 接受它，作为**非报错的反馈**注入并让对话继续[^6]。**怎么确认生效**：`/hooks` 里能看到已加载，让它做个小改动，回答结束后它会多走一轮补测试或明确说「已做完」；看到红色 hook 错误提示就说明你用的还是 `decision: block`。
+
+<details>
+<summary>Stop hook 的 JSON 输出格式与一个坑</summary>
+
+```json
+{
+  "hookSpecificOutput": {
+    "hookEventName": "Stop",
+    "additionalContext": "收尾自检：改动的文件跑过测试了吗？CHANGELOG 更新了吗？没做完就继续，做完了直接说完成。"
+  }
+}
+```
+
+注意 Stop 在**每次**回答结束时都触发，不只是任务完成时；用户手动打断不触发。所以注入的文本要写成「已做完就直接说完成」，否则每轮都被追问一遍。
+
+</details>
+
+**② 判定逻辑写不成正则时，用 prompt 型 / agent 型 hook。**
+
+「测试跑过了吗」「这次改动有没有超出需求范围」这类判断，shell 脚本写不出来。官方的 hook `type` 除 `command` 外还有 `prompt`（单轮模型判定，默认超时 30 秒）和 `agent`（能调 Read / Grep / Glob 去核实再下判断，默认超时 60 秒，官方标注为实验性）[^6]。
+
+<details>
+<summary>prompt 型 hook 的配置与验证方法</summary>
+
+用 `$ARGUMENTS` 占位 hook 输入 JSON：
+
+```json
+{
+  "hooks": {
+    "Stop": [{ "hooks": [{
+      "type": "prompt",
+      "prompt": "判断这轮是否真的完成。输入：$ARGUMENTS。未完成则返回 {\"decision\":\"block\",\"reason\":\"...\"}，完成返回 {}。",
+      "model": "claude-haiku-4-5"
+    }]}]
+  }
+}
+```
+
+模型的输出按和 command hook 的 stdout 同样的规则处理：能解析成 hook JSON 就当决策，否则按纯文本呈现。**怎么确认生效**：故意留一个没跑测试的改动结束一轮，看它是否被判定为未完成。代价是每轮多一次模型调用，别挂在 PreToolUse 这种高频事件上。
+
+</details>
+
+**③ 用 PreToolUse 统计 skill 实际触发次数，找出死 skill。**
+
+写了一堆 skill，没人知道哪些真被调起过。在 PreToolUse 上挂一个只记录不阻断的 hook，把 `tool_name` 和 `tool_input` 追加进日志，跑一两周再统计：零命中的 skill 要么描述写得没法被匹配、要么本来就不该存在。
+
+<details>
+<summary>统计脚本、以及为什么 PreToolUse 统计不全</summary>
+
+```bash
+#!/usr/bin/env bash
+# .claude/hooks/skill-stat.sh —— 只记录，永远 exit 0
+IN=$(cat)
+printf '%s\t%s\t%s\n' "$(date -Iseconds)" \
+  "$(printf '%s' "$IN" | jq -r '.tool_name')" \
+  "$(printf '%s' "$IN" | jq -r '.tool_input | tostring' | cut -c1-200)" \
+  >> "$HOME/.claude/tool-usage.log"
+exit 0
+```
+
+统计：`awk -F'\t' '{print $2}' ~/.claude/tool-usage.log | sort | uniq -c | sort -rn`
+
+两个坑：
+
+- **skill 走的工具名，官方 hooks 文档里没有列举**，本篇不写死名字——先不加 matcher 跑一天，从日志里看真实的 `tool_name` 长什么样，再据此加 matcher 收窄。（社区经验，未见官方确证）
+- **手动敲 `/skillname` 不经过 PreToolUse**，只有模型自己调起才算。要覆盖手动那条路径，得另挂 `UserPromptExpansion`，它按命令名（你的 skill / command 名字）匹配。所以「零命中」的结论要两边日志合起来看。
+
+</details>
+
+上下文余量也能这么用：把已用的绝对 token 数（≥100000 / ≥130000 两档）通过 `additionalContext` 回灌给模型，让它自己知道该收尾了——阈值口径和具体配置见 [#012 上下文窗口要爆了怎么办？](../02-上下文工程/012-上下文窗口要爆了.md)。
+
 ## 为什么
 
 ### 权限规则匹配的是字符串，不是意图
@@ -258,6 +337,7 @@ Read / Edit 的 deny 规则边界一样，官方带 Warning 标注：它们作�
 
 **相关文章**
 
+- [#012 上下文窗口要爆了怎么办？](../02-上下文工程/012-上下文窗口要爆了.md) —— 把已用的绝对 token 数用 `additionalContext` 回灌给模型，是本篇「hook 正面用法」的一个具体实例
 - [#052 怎么不让 AI 把 git 仓库搞乱？](../06-工程协作/052-别让AI搞乱git仓库.md) —— git 层的具体禁令清单，本篇是它依赖的权限系统底座
 - [#072 AI coding 的安全红线怎么画？](../08-团队与组织/072-AI-coding安全红线.md) —— 密钥与数据外泄侧的红线，与本篇的 sandbox credentials 配置互补
 - [#074 团队的 AI coding 规范怎么立？](../08-团队与组织/074-团队AI-coding规范怎么立.md) —— managed settings 属于「该强制」的那一类，规范怎么定见这篇
@@ -277,11 +357,12 @@ Read / Edit 的 deny 规则边界一样，官方带 Warning 标注：它们作�
 [^3]: [Claude Code Docs: Configure the sandboxed Bash tool](https://code.claude.com/docs/en/sandboxing)（官方，2026-08）：默认写范围为工作目录与会话临时目录、默认读范围为整机、平台支持与 `failIfUnavailable`。
 [^4]: [GH #16561](https://github.com/anthropics/claude-code/issues/16561) 与 [GH #28240](https://github.com/anthropics/claude-code/issues/28240)（社区，2026）：复合命令匹配的两个方向相反的实现问题。
 [^5]: [GH #73125](https://github.com/anthropics/claude-code/issues/73125)（社区，2026，已关闭）：`AskUserQuestion` 在终端失焦时 60 秒无应答自动继续。
+[^6]: [Claude Code Docs: Hooks reference](https://code.claude.com/docs/en/hooks)（官方，2026-08）：Stop / SubagentStop 接受 `hookSpecificOutput.additionalContext` 作为非报错反馈并让对话继续；hook `type` 包含 `command` / `http` / `mcp_tool` / `prompt` / `agent`，`prompt` 默认超时 30 秒、`agent` 默认 60 秒且标注为实验性；`$ARGUMENTS` 占位 hook 输入 JSON。
 
 ---
 
 <sub>难度 中级 · 排错题 · 主线 Claude Code</sub>
 
-<sub>**时效**：permissions / hooks / sandboxing / settings 四页的规则语义、退出码、沙箱边界已于 2026-08-04 逐项核实。**已知不确定**：`AskUserQuestion` 超时行为改为默认关闭的具体版本号，issue 里 assignee 的说法与官方发布说明未能对齐，本篇不写死版本号；GH issue 的 👍 数为当时快照。**易变**：折叠块里的版本相关行为表（v2.1.198 / v2.1.208 / v2.1.210 / v2.1.216）随版本更新即失效，wrapper 剥离列表也可能随版本调整，照做前先跑 `claude --verbose` 用实际命令串复核。</sub>
+<sub>**时效**：permissions / hooks / sandboxing / settings 四页的规则语义、退出码、沙箱边界已于 2026-08-04 逐项核实；Stop / SubagentStop 的 `hookSpecificOutput.additionalContext`、五种 hook `type`（command / http / mcp_tool / prompt / agent）及其默认超时同日核实于 hooks 页。**已知不确定**：skill 被模型调起时在 PreToolUse 里的确切 `tool_name`，官方 hooks 文档未列举，本篇让读者先跑日志实测；`AskUserQuestion` 超时行为改为默认关闭的具体版本号，issue 里 assignee 的说法与官方发布说明未能对齐，本篇不写死版本号；GH issue 的 👍 数为当时快照。**易变**：折叠块里的版本相关行为表（v2.1.198 / v2.1.208 / v2.1.210 / v2.1.216）随版本更新即失效，wrapper 剥离列表也可能随版本调整，照做前先跑 `claude --verbose` 用实际命令串复核。</sub>
 
 > 本篇个人实践（L4）：`[待补：BOSS 的实战经验/踩坑]`

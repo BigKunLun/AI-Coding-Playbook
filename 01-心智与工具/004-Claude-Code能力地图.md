@@ -129,7 +129,7 @@ model: sonnet
 
 **表里为什么没有 TDD**：TDD 是你的工作方法，不是 Claude Code 的一项能力，放进这张表会让人以为 CC 里有个叫 TDD 的功能。它的正确位置是上面两项的配套做法 —— 先写一个会失败的测试当终止条件，再用 `PostToolUse` 或 `Stop` hook 把「跑测试」变成每次必发生的事。做法见 [030](../04-执行工作流/030-AI写的测试不可信.md)。
 
-**表里也没有 MCP 和 agent team**：MCP 是「接外部数据和工具」，官方定位是 MCP 把 Claude 接到数据，skill 教 Claude 拿这数据干什么。agent team 是多个独立会话互相通信的形态，官方标注为实验性、默认关闭，和 subagent 的差别是队友之间能直接对话，细节归 032。
+**表里也没有 MCP 和 agent team**：MCP 是「接外部数据和工具」，官方定位是 MCP 把 Claude 接到数据，skill 教 Claude 拿这数据干什么 —— 该装哪些 MCP、怎么量它占了多少上下文，见 [006](./006-MCP装哪些不装哪些.md)。agent team 是多个独立会话互相通信的形态，官方标注为实验性、默认关闭，和 subagent 的差别是队友之间能直接对话，细节归 032。
 
 </details>
 
@@ -244,6 +244,7 @@ Claude Code 的差异在于这四类是各自独立的机制，而不是揉进�
 
 - [#001 Claude Code、Codex、Cursor、Copilot 到底该用哪个？](./001-AI编程工具怎么选.md) —— agentic 本质、四工具形态，本篇的前提
 - [#003 为什么 AI 写的代码我审不动、改完自己看不懂？](./003-AI代码审不动改不懂.md) —— 第 3 层 Orchestration 心智指向本篇，本篇是它的工具展开
+- [#006 装了一堆 MCP 之后卡顿、上下文被吃掉，到底该留哪些？](./006-MCP装哪些不装哪些.md) —— 「表里也没有 MCP」那条注解的展开
 - [#010 CLAUDE.md 怎么写才真的生效？](../02-上下文工程/010-CLAUDE-md怎么写才生效.md) —— CLAUDE.md 与 hooks 的攻略
 - [#013 哪些决策必须写进 memory 才扛得住 compact](../02-上下文工程/013-哪些决策要写进memory.md) —— auto memory 的攻略
 - [#030 TDD 在 AI coding 里怎么做？](../04-执行工作流/030-AI写的测试不可信.md) —— 「表里为什么没有 TDD」那条注解的展开
