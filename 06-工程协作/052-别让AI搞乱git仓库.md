@@ -36,11 +36,15 @@ flowchart TD
     "allow": ["Bash(git status *)", "Bash(git diff *)", "Bash(git log *)",
               "Bash(git add *)", "Bash(git commit *)", "Bash(git checkout -b *)", "Bash(git stash *)"],
     "ask": ["Bash(git push *)", "Bash(git merge *)"],
-    "deny": ["Bash(git push --force *)", "Bash(git push --force*)", "Bash(git push -f *)",
-             "Bash(git push --force-with-lease *)", "Bash(git reset --hard *)", "Bash(git reset --hard*)",
-             "Bash(git rebase *)", "Bash(git clean -fd *)", "Bash(git clean -fd*)",
-             "Bash(git branch -D *)", "Bash(git filter-branch *)", "Bash(git update-ref *)",
-             "Bash(git reflog delete *)"]
+    "deny": ["Bash(git push --force *)", "Bash(git push --force*)",
+             "Bash(git push -f *)", "Bash(git push -f*)",
+             "Bash(git reset --hard *)", "Bash(git reset --hard*)",
+             "Bash(git rebase *)", "Bash(git rebase*)",
+             "Bash(git clean -fd *)", "Bash(git clean -fd*)",
+             "Bash(git branch -D *)", "Bash(git branch -D*)",
+             "Bash(git filter-branch *)", "Bash(git filter-branch*)",
+             "Bash(git update-ref *)", "Bash(git update-ref*)",
+             "Bash(git reflog delete *)", "Bash(git reflog delete*)"]
   }
 }
 ```
@@ -48,7 +52,7 @@ flowchart TD
 三个必须知道的匹配规则[^1]：
 
 - **求值顺序是 deny → ask → allow，先匹配到的说了算**，规则写得多具体不影响顺序。所以上面 `allow` 里再宽的 git 规则也解不开 deny。
-- **`*` 前有没有空格不一样。** `Bash(ls *)` 匹配 `ls -la` 但不匹配 `lsof`；`Bash(ls*)` 两个都匹配。所以对 `--force` / `--hard` / `-fd` 各写了带空格和不带空格两条，为的是覆盖 `git push --force` 这种末尾没有参数的写法。（`Bash(x:*)` 等价于 `Bash(x *)`，只在模式结尾有效。）
+- **`*` 前有没有空格不一样。** `Bash(ls *)` 匹配 `ls -la` 但不匹配 `lsof`；`Bash(ls*)` 两个都匹配。所以上面**每条 deny 都写了带空格和不带空格两条** —— 只写带空格版本的话，`git push -f`、`git rebase` 这种末尾没有参数的裸命令会直接漏过。不带空格版本还顺手覆盖了长参数前缀，比如 `Bash(git push --force*)` 同时拦下 `--force-with-lease`。（`Bash(x:*)` 等价于 `Bash(x *)`，只在模式结尾有效。）
 - **复合命令逐段匹配。** Claude Code 认识 `&&`、`||`、`;`、`|`、`&`、换行，`git status && git reset --hard` 里的后半段会被单独拿去匹配 deny，不会因为前半段被允许就整条放行。
 
 **怎么确认生效**：

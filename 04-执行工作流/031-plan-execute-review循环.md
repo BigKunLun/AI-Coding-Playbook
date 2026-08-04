@@ -88,6 +88,8 @@ flowchart TD
 ## 1. 涉及文件清单
 逐行格式：`具体/文件/路径.ts` —— 一句话说明为什么要动它
 只写你实际读过的文件；没读过就先读。不准写"相关模块""若干配置"这类模糊指代。
+写完这一段后，另外产出一个文件 PLAN-FILES.txt：每行一个仓库根目录起算的相对路径，
+不加反引号、不加说明、不加序号，内容必须与本段逐行一一对应。
 
 ## 2. 每个文件的改动性质
 逐行格式：`路径` | 新增 / 修改 / 删除 | 改动的函数或符号名 | 预计行数量级
@@ -122,14 +124,17 @@ SPEC.md 里没提到的文件，单独标 [范围外] 并说明为什么必须�
 grep -cE '^[0-9]+\.' PLAN.md
 grep -c '^- 验证：' PLAN.md
 
-# 计划点名了哪些文件（闸门 B 要拿它跟真实 diff 比对）
-grep -oE '`[^`]+\.(ts|tsx|js|py|go|java|rs|rb)`' PLAN.md | tr -d '`' | sort -u > /tmp/plan-files.txt
+# 计划点名了哪些文件：直接用 agent 产出的纯路径清单，不从正文里正则抠
+sort -u PLAN-FILES.txt > /tmp/plan-files.txt
+wc -l < /tmp/plan-files.txt          # 跟第 1 段的行数核对，对不上说明清单没同步
 
 # 有没有模糊指代
 grep -nE '相关模块|若干|等文件|顺便|同时优化' PLAN.md && echo "存在模糊表述，打回" || echo "无模糊表述"
 ```
 
-预期：前两条命令打印同一个数字，最后一条打印「无模糊表述」。
+预期：前两条命令打印同一个数字；`wc -l` 的结果等于 PLAN.md 第 1 段的行数；最后一条打印「无模糊表述」。
+
+用单独的 `PLAN-FILES.txt` 而不是拿正则从 PLAN.md 里抠路径，是因为正则挡不住真实项目的文件名 —— `src/config.yaml`、`Dockerfile`、`package.json`、`.github/workflows/ci.yml` 这类要么没有常见代码扩展名，要么根本没有扩展名，靠「反引号 + 扩展名白名单」匹配会大面积漏掉，首跑就是满屏假告警。
 
 </details>
 
@@ -140,14 +145,21 @@ grep -nE '相关模块|若干|等文件|顺便|同时优化' PLAN.md && echo "�
 #### 闸门 B：文件清单对账
 
 ```bash
+# 计划清单（agent 产出的纯路径文件，一行一个路径）
+sort -u PLAN-FILES.txt > /tmp/plan-files.txt
+
 # 实际改了哪些文件
-git diff --name-only <基线分支>... | sort > /tmp/actual-files.txt
+git diff --name-only <基线分支>... | sort -u > /tmp/actual-files.txt
 
 # 左边=计划里有但没改，右边=改了但计划里没有
 diff /tmp/plan-files.txt /tmp/actual-files.txt
 ```
 
-预期：`diff` 无输出。出现 `>` 开头的行就是范围蔓延 —— 这正是「让它改一个功能，它动了一堆无关文件」的检出点。逐个追问，说不清就 `git checkout` 还原那个文件。同时要求 agent 贴全量测试的原始输出，而不是「测试都过了」这句话。
+**怎么确认生效**：`diff` 无输出、命令退出码为 0，终端不打印任何内容 —— 这是全部改动都在计划内的样子。有差异时输出形如 `3a4` 加一行 `> src/config.yaml`。
+
+注意路径写法要一致：`PLAN-FILES.txt` 必须是仓库根目录起算的相对路径，跟 `git diff --name-only` 的输出格式一样，否则会出现「同一个文件两边都列了却对不上」的假告警。首跑如果左右两列大面积不一致，先检查是不是路径前缀问题，再怀疑范围蔓延。
+
+出现 `>` 开头的行就是范围蔓延 —— 这正是「让它改一个功能，它动了一堆无关文件」的检出点。逐个追问，说不清就 `git checkout` 还原那个文件。同时要求 agent 贴全量测试的原始输出，而不是「测试都过了」这句话。
 
 ### Phase ④：REVIEW，对抗式验收
 
@@ -246,9 +258,11 @@ Anthropic 最佳实践里有一个独立小节叫「Explore first, then plan, th
 
 ### 计划质量是执行准确率的主导因素，不是玄学
 
-CHI 2025 一项 N=248、2×2 因子设计（自动 vs 人工参与 × 规划阶段 vs 执行阶段）的实证研究把 LLM agent 称为「双刃剑」：有高质量计划、且执行阶段有必要的人工参与时，能达到约 66% 的执行准确率；缺了这些条件，agent 会同时损害信任和绩效[^2]。
+直接理由是机制上的：计划把「要改哪些文件、每步怎么验证」写成可对账的清单，闸门 A、B 才有东西可查。没有计划，你手上唯一的判据就是「看着还行」。
 
-这解释了为什么 vibe coding（不给约束、让 agent 自由发挥）在探索期爽、在生产期崩：没有高质量计划这个前置条件，agent 的自主性是有害的。
+有研究显示计划质量会显著影响 agent 执行表现 —— CHI 2025 一项 N=248 的实证研究把 LLM agent 称为「双刃剑」，缺少高质量计划时 agent 会同时损害信任和绩效，有计划且执行阶段有人工参与时报告了约 66% 的执行准确率[^2]。但这个数字出自受控实验任务，实验条件与日常写代码场景差异大，仅作方向参考，别拿它当自己项目的预期值。
+
+机制上的理由更能解释为什么 vibe coding（不给约束、让 agent 自由发挥）在探索期爽、在生产期崩：没有高质量计划这个前置条件，agent 的自主性是有害的。
 
 > 个人观点（小C）：很多人把「规划」理解成写一大段需求文档甩给 agent，这是另一种极端。真正有效的规划是对话式的 —— agent 反问你，你回答，它把歧义收敛成方案，你再审。规划的本质是在动手前把假设暴露出来，不是把文档写得更长。
 
@@ -320,7 +334,7 @@ Simon Willison 给跳过 review 的后果起了个名字：house of cards code�
 - [Spec Kit Discussion #775](https://github.com/github/spec-kit/discussions/775) —— 支撑「spec/plan/实现三者漂移」这条反模式（社区，2025）
 
 [^1]: [Best practices for Claude Code](https://code.claude.com/docs/en/best-practices)（官方，2026-08 核实）：让 Claude 直接上手写代码，可能产出解错了题的代码；用 plan mode 把探索和执行分开。
-[^2]: [Plan-Then-Execute (CHI 2025) — arXiv:2502.01390](https://arxiv.org/abs/2502.01390)（学术，2025）：N=248，高质量计划配合必要的人工执行参与时约 66% 执行准确率。
+[^2]: [Plan-Then-Execute (CHI 2025) — arXiv:2502.01390](https://arxiv.org/abs/2502.01390)（学术，2025）：N=248，高质量计划配合必要的人工执行参与时约 66% 执行准确率。该数字与实验任务设定出自论文全文，本库仅核实到摘要级，实验条件（任务类型、准确率如何判定）未确证，正文只作方向性佐证。
 [^3]: [Best practices for Claude Code](https://code.claude.com/docs/en/best-practices)（官方，2026-08 核实）：能用一句话描述 diff 就跳过规划；方案不确定、跨多文件、对代码不熟这三种情况必须规划。
 [^4]: [Best practices for Claude Code](https://code.claude.com/docs/en/best-practices)（官方，2026-08 核实）：被要求找缺口的 reviewer 通常会报出一些，即使工作本身没问题；追着每条 finding 改会导致过度设计。
 
@@ -328,6 +342,6 @@ Simon Willison 给跳过 review 的后果起了个名字：house of cards code�
 
 <sub>难度 中级 · 流程题 · 主线 Claude Code，横向 Cursor / Copilot</sub>
 
-<sub>**时效**：plan mode 的进入方式（`Shift+Tab` / `/plan` / `--permission-mode plan` / `defaultMode`）、`Ctrl+G` 编辑计划、批准计划的选项、`opusplan` 别名与四种配置入口，已于 2026-08-03 对照官方 permission-modes 与 model-config 文档逐条核对。**已知不确定**：CHI 2025 论文（arXiv:2502.01390）真实存在，N=248 与「低质量计划损害信任」已在摘要确认；「约 66% 执行准确率」与「2×2 因子设计」出自论文全文，本轮仅核实到摘要级，引用前建议复核原文。**易变**：Claude Code 版本行为随小版本变化快，本文所述以 v2.1.2xx 系列文档为准。</sub>
+<sub>**时效**：plan mode 的进入方式（`Shift+Tab` / `/plan` / `--permission-mode plan` / `defaultMode`）、`Ctrl+G` 编辑计划、批准计划的选项、`opusplan` 别名与四种配置入口，已于 2026-08-03 对照官方 permission-modes 与 model-config 文档逐条核对。闸门 A / B 的文件清单对账已于 2026-08-04 改为「agent 直接产出 `PLAN-FILES.txt` 纯路径清单」，替换掉原先靠「反引号 + 扩展名白名单」正则抠路径的写法 —— 后者会漏掉 `Dockerfile`、`package.json`、`src/config.yaml` 这类文件，导致首跑满屏假告警。**已知不确定**：CHI 2025 论文（arXiv:2502.01390）真实存在，N=248 与「低质量计划损害信任」已在摘要确认；「约 66% 执行准确率」与「2×2 因子设计」出自论文全文，本库仅核实到摘要级，实验条件未确证，正文已把它降为方向性佐证而非立论论据。**易变**：Claude Code 版本行为随小版本变化快，本文所述以 v2.1.2xx 系列文档为准。</sub>
 
 > 本篇个人实践（L4）：`[待补：BOSS 的实战经验——你跳过规划直接动手被坑 / 认真规划后一次过的对比案例，或 superpowers 三段链启用后返工率的变化]`
