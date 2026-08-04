@@ -10,6 +10,8 @@ TOPICS=(01-心智与工具 02-上下文工程 03-需求与规划 \
 
 REQUIRED_SECTIONS=("## 30 秒结论" "## 怎么做" "## 为什么" "## 别这么干" "## 延伸")
 VISIBLE_LIMIT=140   # 折叠块之外的正文行数上限（超出只警告）
+STALE_MONTHS=6      # 时效核实日期超过 N 个月即提醒复核（警告级）
+NOW_MONTHS=$(( 10#$(date +%Y) * 12 + 10#$(date +%m) ))
 
 errors=0
 warns=0
@@ -81,8 +83,32 @@ for f in "${FILES[@]}"; do
       echo "⚠ $id: 默认可见正文 ${visible} 行（建议 ≤ ${VISIBLE_LIMIT}），深水区可折进 <details>"
       warns=$((warns + 1))
     fi
+
+    # 9. 时效超期扫描（警告级）：取文末时效行里最新的日期，超 STALE_MONTHS 个月提醒复核
+    fresh_line=$(grep '<sub>\*\*时效\*\*' "$f" | head -1 || true)
+    if [ -z "$fresh_line" ]; then
+      echo "⚠ $id: 文末缺少 <sub>**时效**…</sub> 声明"; warns=$((warns + 1))
+    else
+      latest=$(printf '%s' "$fresh_line" | grep -oE '20[0-9]{2}-[0-9]{2}' | sort | tail -1 || true)
+      if [ -z "$latest" ]; then
+        echo "⚠ $id: 时效行里没有可解析的核实日期（YYYY-MM 或 YYYY-MM-DD）"; warns=$((warns + 1))
+      else
+        m=$(( 10#${latest:0:4} * 12 + 10#${latest:5:2} ))
+        if [ $(( NOW_MONTHS - m )) -gt "$STALE_MONTHS" ]; then
+          echo "⚠ $id: 时效核实日期 $latest 已超 ${STALE_MONTHS} 个月，建议复核易变项"
+          warns=$((warns + 1))
+        fi
+      fi
+    fi
   fi
 done
+
+# 10. README 目录表与 llms.txt 必须是 gen-toc.sh 的生成产物（仅全库模式检查）
+if [ "$#" -eq 0 ]; then
+  if ! bash "$ROOT/scripts/gen-toc.sh" --check; then
+    errors=$((errors + 1))
+  fi
+fi
 
 echo "──"
 echo "检查 $checked 篇：$errors 处错误，$warns 处提示"
