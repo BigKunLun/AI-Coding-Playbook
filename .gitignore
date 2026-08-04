@@ -32,3 +32,6 @@ Thumbs.db
 node_modules/
 .cache/
 tmp/
+
+# ---- 渲染工具的本地虚拟环境 ----
+.venv/
