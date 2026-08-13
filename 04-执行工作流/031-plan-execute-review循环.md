@@ -216,7 +216,7 @@ claude --permission-mode plan
 - **退出而不批准**：再按一次 `Shift+Tab`。
 - **批准即离开**：批准计划会退出 plan mode 并切到你选的权限模式，Claude 随即开始改文件。想再规划一次，`Shift+Tab` 循环回去或再用 `/plan` 前缀。
 - **编辑计划**：`Ctrl+G` 在默认文本编辑器里打开计划直接改，比来回让 agent 改快得多。很多人不知道这个。
-- **plan mode 不等于完全只读**：它挡的是编辑。命令执行在开了 auto mode 且 `useAutoModeDuringPlan` 打开时由分类器判断放行；在开了 bypass permissions 的会话里，plan mode 的拦截根本不生效。别拿它当安全沙箱，要真隔离用 `/sandbox` 或容器。
+- **plan mode 不等于完全只读**：它挡的是编辑。命令执行在 auto mode 可用且 `useAutoModeDuringPlan` 打开时由分类器判断放行，**这两个前提如今默认都成立** —— `useAutoModeDuringPlan` 官方默认为开，而 2026-08-14 起 auto 又成了 Pro / Max / Team 新会话的默认档[^5]。也就是说「规划阶段里 shell 命令不问你直接跑」从例外变成了常态。在开了 bypass permissions 的会话里，plan mode 的拦截更是根本不生效。别拿它当安全沙箱，要真隔离用 `/sandbox` 或容器。
 
 **用 `opusplan` 让「想」和「做」分开花算力**：plan mode 里用 Opus 做架构决策，退出后自动切 Sonnet 做代码生成。四种配置入口（官方按优先级从高到低）：
 
@@ -337,6 +337,7 @@ Simon Willison 给跳过 review 的后果起了个名字：house of cards code�
 [^2]: [Plan-Then-Execute (CHI 2025) — arXiv:2502.01390](https://arxiv.org/abs/2502.01390)（学术，2025）：N=248，高质量计划配合必要的人工执行参与时约 66% 执行准确率。该数字与实验任务设定出自论文全文，本库仅核实到摘要级，实验条件（任务类型、准确率如何判定）未确证，正文只作方向性佐证。
 [^3]: [Best practices for Claude Code](https://code.claude.com/docs/en/best-practices)（官方，2026-08 核实）：能用一句话描述 diff 就跳过规划；方案不确定、跨多文件、对代码不熟这三种情况必须规划。
 [^4]: [Best practices for Claude Code](https://code.claude.com/docs/en/best-practices)（官方，2026-08 核实）：被要求找缺口的 reviewer 通常会报出一些，即使工作本身没问题；追着每条 finding 改会导致过度设计。
+[^5]: [CC Docs: Permission modes](https://code.claude.com/docs/en/permission-modes)（官方，2026-08-13 访问）：`useAutoModeDuringPlan` 默认为开（原文「which it is by default」），开启时规划阶段的 shell 命令交由分类器审而不再弹窗；同页另注明 2026-08-14 起 auto 成为 Pro / Max / Team 新会话的默认权限档。
 
 ---
 
