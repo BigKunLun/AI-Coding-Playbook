@@ -122,10 +122,12 @@ model: sonnet
 |------|------|------|--------|----------|
 | **CLAUDE.md** | 管上下文 | 你写的持久指令，每次会话开始时自动加载全文 | 项目事实、技术栈、构建命令、团队约定要每次生效时写进去。目标 200 行以内 | [010](../02-上下文工程/010-CLAUDE-md怎么写才生效.md) |
 | **auto memory** | 管上下文 | Claude 自己写的跨会话笔记，默认开启，存在 `~/.claude/projects/<project>/memory/`，每次会话只加载 `MEMORY.md` 的前 200 行或 25KB。与 CLAUDE.md 的差别就一句：**CLAUDE.md 是你写规则，auto memory 是它记发现** | 你不想手动维护、但希望它自己攒下来的东西：构建命令、调试踩坑、你纠正过的偏好。单项目关掉就在 `.claude/settings.json` 写 `{"autoMemoryEnabled": false}` | [013](../02-上下文工程/013-哪些决策要写进memory.md) |
-| **permission modes**（含 plan） | 管节奏 | 控制 Claude 多频繁停下来问你的权限档，官方表里共 6 档：`default`（每次首用某个工具时停下来问你，能写文件只是要确认，CLI 里标签叫 Manual）、`acceptEdits`、`plan`（真正只读的那一档）、`auto`、`dontAsk`、`bypassPermissions`。**plan 就是其中一档**，不是叠在别的档上的修饰 | 敏感活用 `default`；迭代改代码用 `acceptEdits`；动手前先想清楚用 `plan`；长任务减少打断用 `auto`；CI 脚本用 `dontAsk`；`bypassPermissions` 只在容器或虚拟机里用。会话里按 `Shift+Tab` 循环 `default → acceptEdits → plan`，所以进 plan 是连按两次 | [031](../04-执行工作流/031-plan-execute-review循环.md) |
+| **permission modes**（含 plan） | 管节奏 | 控制 Claude 多频繁停下来问你的权限档，官方表里共 6 档：`default`（每次首用某个工具时停下来问你，能写文件只是要确认，CLI 里标签叫 Manual）、`acceptEdits`、`plan`（真正只读的那一档）、`auto`、`dontAsk`、`bypassPermissions`。**plan 就是其中一档**，不是叠在别的档上的修饰。**2026-08-14 起新会话的默认档变了**，见表下说明 | 敏感活用 `default`；迭代改代码用 `acceptEdits`；动手前先想清楚用 `plan`；长任务减少打断用 `auto`；CI 脚本用 `dontAsk`；`bypassPermissions` 只在容器或虚拟机里用。会话里按 `Shift+Tab` 循环 `default → acceptEdits → plan`，所以进 plan 是连按两次 | [031](../04-执行工作流/031-plan-execute-review循环.md) |
 | **hooks** | 管节奏 | 写在 settings.json 的 `hooks` 键下的确定性闸门，在 `PreToolUse`、`PostToolUse`、`Stop`、`SessionStart` 等生命周期事件上跑东西，由 Claude Code 本身执行，不靠 Claude 自觉 | 必须每次都发生、且不需要 Claude 动脑的事：编辑后跑 lint、拦掉危险命令、会话结束发通知 | 本库暂无独立篇；配置写法见 [010](../02-上下文工程/010-CLAUDE-md怎么写才生效.md)，跑测试类 hook 见 [033](../04-执行工作流/033-Skill与superpowers怎么用.md) |
 | **skill** | 管复用 | 按需加载的流程和参考资料，会话开始只加载描述、用到才加载正文 | 同一段流程或检查清单反复粘贴（3 次以上），或 CLAUDE.md 某节变成了流程。项目级 `.claude/skills/<名字>/SKILL.md`，个人级 `~/.claude/skills/<名字>/SKILL.md` | [033](../04-执行工作流/033-Skill与superpowers怎么用.md) |
 | **subagent** | 管并行与隔离 | 独立上下文窗口的 worker，只把摘要回给主会话 | 冗长输出要隔离（跑测试、读大量日志）、有两个以上独立子任务要并行、或需要一个工具受限的专用 worker | [032](../04-执行工作流/032-SubAgent并行开几个.md) |
+
+**默认档在 2026-08-14 变了**：在此之前，新会话一律从 `default`（Manual，每次首用某个工具都停下来问）起步。从这天起，Pro / Max / Team 计划的新会话默认档改成 `auto` —— 工具调用由后台分类器判断放行，只在它认为动作与你的请求不符时才拦。三种情况不受影响：你自己在设置里写过 `defaultMode` 的（会收到一次性切换提示，不接受就保持原样）、组织用 managed settings 托管了默认档的、以及走 Bedrock / Vertex / Foundry / 网关这些通道的（那边 `auto` 只是出现在 `Shift+Tab` 循环里，起始档仍是 Manual）[^4]。**影响是双向的**：想少被打断的人不用再配了；而习惯「默认档会拦住我」的人，那层弹窗确认没了，敏感目录下要主动 `Shift+Tab` 切回 Manual，或用 `permissions.disableAutoMode` 关掉。分类器默认拦什么、放什么，见 [083](../09-工具可靠性/083-permissions和hooks拦不住.md)。
 
 **表里为什么没有 TDD**：TDD 是你的工作方法，不是 Claude Code 的一项能力，放进这张表会让人以为 CC 里有个叫 TDD 的功能。它的正确位置是上面两项的配套做法 —— 先写一个会失败的测试当终止条件，再用 `PostToolUse` 或 `Stop` hook 把「跑测试」变成每次必发生的事。做法见 [030](../04-执行工作流/030-AI写的测试不可信.md)。
 
@@ -267,11 +269,12 @@ Claude Code 的差异在于这四类是各自独立的机制，而不是揉进�
 [^1]: [CC Docs: Extend Claude Code](https://code.claude.com/docs/en/features-overview)（官方，2026-08 访问）："Build your setup over time" 用「触发条件 → 加什么」组织；并明确 CLAUDE.md 或 skill 里的 "never edit `.env`" 是一个请求而非保证，`PreToolUse` hook 才是强制。
 [^2]: [CC Docs: Extend Claude with skills](https://code.claude.com/docs/en/skills)（官方，2026-08 访问）：当你反复往聊天里粘同一套指令、清单或多步流程，或者 CLAUDE.md 里某节从一条事实长成了一套流程时，就该做一个 skill。
 [^3]: [CC Docs: How Claude remembers your project](https://code.claude.com/docs/en/memory)（官方，2026-08 访问）：CLAUDE.md 在系统提示之后以用户消息形式送入，不保证严格遵守。
+[^4]: [CC Docs: Permission modes](https://code.claude.com/docs/en/permission-modes)（官方，2026-08-13 访问）原文：「Starting August 14, 2026, auto mode becomes the default permission mode for new sessions on Pro, Max, and Team plans. You can switch modes at any time. A default you set yourself stays in place unless you accept the one-time switch prompt, and a default your organization manages is unchanged.」同页另注明，Bedrock / Vertex / Foundry / 网关通道上 `auto` 只是默认出现在 `Shift+Tab` 循环里，会话起始档仍是 `defaultMode`（默认 Manual）。
 
 ---
 
 <sub>难度 中级 · 配置题 + 决策题 · 主线 Claude Code，横向 Cursor / Copilot</sub>
 
-<sub>**时效**：2026-08-03 复核。权限档、hooks JSON 结构、skill / subagent 文件路径与 frontmatter 字段均对照官方文档原页逐条核对（permission-modes / hooks / skills / sub-agents / memory / features-overview 六页）。**已知不确定**：四类分类框架是本库在官方触发表之上的再归纳，不是官方术语。**易变**：具体路径、字段名、快捷键、`/agents` 之类命令的行为随版本变化，涉及版本行为处已标最低版本号，以官方文档为准。</sub>
+<sub>**时效**：2026-08-03 复核，权限档默认值一项 2026-08-13 复核。权限档、hooks JSON 结构、skill / subagent 文件路径与 frontmatter 字段均对照官方文档原页逐条核对（permission-modes / hooks / skills / sub-agents / memory / features-overview 六页）。**已知不确定**：四类分类框架是本库在官方触发表之上的再归纳，不是官方术语。**易变**：具体路径、字段名、快捷键、`/agents` 之类命令的行为随版本变化，涉及版本行为处已标最低版本号，以官方文档为准。</sub>
 
 > 本篇个人实践（L4）：`[待补：BOSS 的能力地图使用顺序 / 哪个能力最先上手 / 哪个最后才用]`

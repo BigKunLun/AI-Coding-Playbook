@@ -350,7 +350,9 @@ Read / Edit 的 deny 规则边界一样，官方带 Warning 标注：它们作�
 
 有一个版本的 `AskUserQuestion` 在 60 秒无人应答后会自动返回「用户可能不在电脑前，请按你的判断继续」然后往下跑，而很多人正是拿它当危险操作前的人工确认闸[^5]。该行为已改为默认关闭、超时窗口可配，并且只在终端**没有焦点**时触发。
 
-留下的通用教训比这个具体 bug 重要：**真正不可逆的动作要做成默认拒绝、显式放行，而不是默认询问。**
+**就算人确实在电脑前，也拦不住多少。** 一个 4 万名玩家、40.9 万次「放行 / 拦截 agent 命令」决策的公开实验给出了这个环节的实际拦截率：人工审批平均漏过三分之一的威胁（准确率 66.3%）；凭据外泄漏 33.4%，越权读密钥漏 35%；最容易被放行的是伪装成 `npm run analyze` 这类日常命令的那一类，64.7% 被批准；而且同一场会话里越往后漏得越多 —— 疲劳是可测量的，不是感觉[^8]。两件事指向同一个结论：**人工确认不是安全边界，它是通知机制**，把它当边界等于把安全性押在「你这次刚好没走神」上。
+
+留下的通用教训比这个具体 bug 重要：**真正不可逆的动作要做成默认拒绝、显式放行，而不是默认询问。**从 2026-08-14 起这个环节的默认形态也变了：Pro / Max / Team 新会话的默认档从 Manual 改成 `auto`，工具调用先过后台分类器，只在它判定动作与你的请求不符时才拦[^9]。方向与本节一致 —— 用确定性检查替掉人眼确认。但它换掉的只是弹窗：`deny` 规则和 PreToolUse hook 在 auto 档下照样生效，也照样是你唯一能自己控制的硬边界。
 
 ## 别这么干
 
@@ -386,6 +388,8 @@ Read / Edit 的 deny 规则边界一样，官方带 Warning 标注：它们作�
 [^5]: [GH #73125](https://github.com/anthropics/claude-code/issues/73125)（社区，2026，已关闭）：`AskUserQuestion` 在终端失焦时 60 秒无应答自动继续。
 [^6]: [Claude Code Docs: Hooks reference](https://code.claude.com/docs/en/hooks)（官方，2026-08）：Stop / SubagentStop 接受 `hookSpecificOutput.additionalContext` 作为非报错反馈并让对话继续；hook `type` 包含 `command` / `http` / `mcp_tool` / `prompt` / `agent`，`prompt` 默认超时 30 秒、`agent` 默认 60 秒且标注为实验性；`$ARGUMENTS` 占位 hook 输入 JSON。
 [^7]: [Claude Code Docs: Settings](https://code.claude.com/docs/en/settings) 与 [Configure permissions](https://code.claude.com/docs/en/permissions)（官方，个人研究整理，2026-07-09 按 v2.1.203 逐项核实）：五层优先级 Managed > CLI 参数 > Local > Project > User；Managed 三种交付取一个源不合并；标量字段覆盖、`permissions` 三类清单跨层拼接、任一层 deny 其他层不可 allow；评估顺序 deny → ask → allow；settings.json 不向父目录回溯；工具规则的参数形式与裸工具名 deny 的语义。
+[^8]: 社区公开实验（HN 49195468，2026-08-06，339 分）：约 4 万名参与者、40.9 万次对 agent 命令的放行 / 拦截决策，人工审批平均准确率 66.3%（漏过约 1/3 威胁），凭据外泄漏 33.4%、越权访问密钥漏 35%，伪装成日常命令的那一类 64.7% 被批准，且漏判率随会话推进上升。样本量大但为游戏化环境下的自愿参与者，与真实工作场景的注意力水平不完全可比，**未见官方或同行评审确证**。
+[^9]: [CC Docs: Permission modes](https://code.claude.com/docs/en/permission-modes)（官方，2026-08-13 访问）原文：「Starting August 14, 2026, auto mode becomes the default permission mode for new sessions on Pro, Max, and Team plans.」自设的 `defaultMode` 与组织托管的默认档不受影响；`permissions.disableAutoMode: "disable"` 可整体关掉该档。
 
 ---
 
