@@ -24,6 +24,8 @@ flowchart TD
     E --> G
 ```
 
+硬门禁只能靠 `permissions.deny` 或 PreToolUse hook，**写进 CLAUDE.md 等于没写**。
+
 ## 怎么做
 
 ### 第 1 步：把破坏性 git 命令写进 `permissions.deny`

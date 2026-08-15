@@ -23,12 +23,14 @@ flowchart TD
     F -->|过| G[③ EXECUTE<br/>小步 + 留证据]
     G --> H{闸门 B<br/>文件清单对账}
     H -->|多改了文件| G
-    H -->|一致| I[④ REVIEW<br/>全新上下文挑刺]
+    H -->|一致| I[④ REVIEW<br/>三档按强度选]
     I --> J{方向错<br/>还是实现不到位}
     J -->|方向错| E
     J -->|实现不到位| G
     J -->|都没问题| K[合入]
 ```
+
+**一句话说不完这次 diff 就走完整循环**，闸门 B 用 `git diff --name-only` 跟计划清单对账。
 
 ## 怎么做
 
@@ -60,7 +62,7 @@ flowchart TD
 | ① UNDERSTAND | 你 + agent 对话 | SPEC.md（点名文件与接口、写明 out of scope、以端到端验证收尾） | —— |
 | ② PLAN | agent，只读模式 | PLAN.md（文件清单 / 改动性质 / 分步顺序 / 每步验证命令） | **闸门 A**：清单逐条勾 |
 | ③ EXECUTE | agent 写代码 | 代码 + 每步的测试/构建输出 | **闸门 B**：文件清单对账 |
-| ④ REVIEW | 全新上下文的 subagent | gap 列表 | 影响正确性的 gap 全修 + 重测通过 |
+| ④ REVIEW | 三档按强度选：agent 自验证 / `/goal` 评估器 / 全新上下文 subagent | gap 列表 | 影响正确性的 gap 全修 + 重测通过 |
 
 不通过时的回退规则：方向错了回 ②，只是实现没到位回 ③。
 

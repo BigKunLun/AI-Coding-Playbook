@@ -25,6 +25,8 @@ flowchart TD
     H -->|否| J["放 .claude/skills/"]
 ```
 
+**粘贴过 3 次以上的流程才抽成 skill**；事实归 CLAUDE.md，能用脚本强制的归 hook。
+
 ## 怎么做
 
 ### 第一步：判断这到底该不该是 skill
@@ -152,6 +154,19 @@ paths: apps/web/**/*.{ts,tsx}
 官方给的基线测法是：在全新会话里分别跑「开 skill」和「关 skill」对比结果，并推荐用 `skill-creator` 插件把这套评估自动化，含两个版本 skill 的盲测 A/B[^8]。superpowers 更极端，把写 skill 当 TDD 做 —— 先跑基线看 agent 没有 skill 时怎么失败（RED），再写 skill 让它变对（GREEN），最后堵漏洞（REFACTOR）。
 
 ### 排错：不触发 / 触发太频繁
+
+```mermaid
+flowchart TD
+    A[skill 该触发时<br/>不触发] --> B{/context 的 skill<br/>分项里有它吗}
+    B -->|没有| C[预算被挤掉了<br/>调 budget 或设 name-only]
+    B -->|有| D{手敲 /name<br/>能触发吗}
+    D -->|不能| E[frontmatter YAML 坏了<br/>跑 --debug 看解析错误]
+    D -->|能| F{description 里有<br/>用户会说出口的词吗}
+    F -->|没有| G[补关键词<br/>以 Use when 收尾]
+    F -->|有| H[请求措辞贴近<br/>description 再试]
+```
+
+**先看 `/context` 里有没有它** —— 不在列表就是预算被挤掉了，改多少遍 description 都没用。
 
 <details>
 <summary>不触发时的 6 步检查清单（触发太频繁的处理在末尾）</summary>

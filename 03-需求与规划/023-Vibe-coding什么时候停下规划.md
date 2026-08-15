@@ -27,6 +27,8 @@ flowchart TD
     F --> G[plan mode 补 spec<br/>开新会话执行]
 ```
 
+**讲不清、纠正超 2 次、上下文过半，命中任意一条就停**，先把结论写进 SPEC.md 再 `/clear`。
+
 ## 怎么做
 
 ### 先定性：这个项目还能不能 vibe

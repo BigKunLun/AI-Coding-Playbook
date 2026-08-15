@@ -25,6 +25,8 @@ flowchart TD
     H -->|是| I[才动用 Fable]
 ```
 
+**默认走 Sonnet**；漏文件、没跑测试是升 `/effort`，方向错才换 Opus。
+
 ## 怎么做
 
 三档路由，从默认往上升级。

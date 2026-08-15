@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Q&A 结构合规验证 —— 知识库的"测试套件"
-# 检查：文件名编号、5 段结构、元信息下沉、折叠块可渲染、正文无行内来源、篇幅
+# 检查：文件名编号、5 段结构、元信息下沉、折叠块可渲染、正文无行内来源、篇幅、mermaid 图注
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -10,6 +10,8 @@ TOPICS=(01-心智与工具 02-上下文工程 03-需求与规划 \
 
 REQUIRED_SECTIONS=("## 30 秒结论" "## 怎么做" "## 为什么" "## 别这么干" "## 延伸")
 VISIBLE_LIMIT=140   # 折叠块之外的正文行数上限（超出只警告）
+CAPTION_LIMIT=55    # mermaid 图注字数上限（去掉 markdown 标记后，超出只警告）
+FIGURE_LIMIT=2      # 单篇 mermaid 图数上限：默认 1 张，独立判断维度才准加第 2 张
 STALE_MONTHS=6      # 时效核实日期超过 N 个月即提醒复核（警告级）
 NOW_MONTHS=$(( 10#$(date +%Y) * 12 + 10#$(date +%m) ))
 
@@ -100,10 +102,36 @@ for f in "${FILES[@]}"; do
         fi
       fi
     fi
+    # 10. 每张 mermaid 图后都要有一句话图注，且是结论不是流程复述
+    nfig=$(grep -c '^```mermaid' "$f" || true)
+    if [ "$nfig" -gt 0 ]; then
+      if [ "$nfig" -gt "$FIGURE_LIMIT" ]; then
+        echo "✗ $id: 有 ${nfig} 张图（上限 ${FIGURE_LIMIT}），第三张说明这篇装了两个问题，该拆篇不该加图"
+        errors=$((errors + 1))
+      fi
+      idx=0
+      while IFS= read -r caption; do
+        idx=$((idx + 1))
+        if printf '%s' "$caption" | grep -qE '^(#|>|\||<|\* |- |\+ |[0-9]+\. )'; then
+          echo "✗ $id: 第 ${idx} 张图后面是标题/引用/表格/列表，缺一句话图注"; errors=$((errors + 1))
+        elif printf '%s' "$caption" | grep -qE '上图|该图|这张图|如图|图注|流程如下|如下图'; then
+          echo "✗ $id: 第 ${idx} 张图的图注在复述流程，应改写成一句话结论"; errors=$((errors + 1))
+        else
+          clen=$(printf '%s' "$caption" | tr -d '*`_ ' | wc -m | tr -d ' ')
+          if [ "$clen" -gt "$CAPTION_LIMIT" ]; then
+            echo "⚠ $id: 第 ${idx} 张图的图注 ${clen} 字（建议 ≤ ${CAPTION_LIMIT}），超长通常是塞了不止一个论点"
+            warns=$((warns + 1))
+          fi
+        fi
+      done < <(awk '/^```mermaid/{blk=1;next} blk&&/^```/{blk=0;want=1;next} want&&NF{print;want=0}' "$f")
+      if [ "$idx" -lt "$nfig" ]; then
+        echo "✗ $id: 有 $((nfig - idx)) 张 mermaid 图后面没有任何内容，缺图注"; errors=$((errors + 1))
+      fi
+    fi
   fi
 done
 
-# 10. README 目录表与 llms.txt 必须是 gen-toc.sh 的生成产物（仅全库模式检查）
+# 11. README 目录表与 llms.txt 必须是 gen-toc.sh 的生成产物（仅全库模式检查）
 if [ "$#" -eq 0 ]; then
   if ! bash "$ROOT/scripts/gen-toc.sh" --check; then
     errors=$((errors + 1))
