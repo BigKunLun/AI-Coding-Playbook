@@ -1,6 +1,6 @@
 # 032. 开几个 agent 并行跑，结果互相踩、被限流、token 指数级炸开——并行到底该开几个？
 
-**一句话**：SubAgent 买的是上下文隔离不是速度，代价约 15 倍 token —— 编码任务开 2 到 4 个，用 `tools` 白名单掐掉它继续派活的能力，派完立刻跑 `/tasks` 数一下实际在跑几个。
+**一句话**：SubAgent 买的是上下文隔离不是速度，token 代价数倍起步、研究型多 Agent 系统官方实测约 15 倍 —— 编码任务可并行子任务更少，开 2 到 4 个，用 `tools` 白名单掐掉它继续派活的能力，派完立刻跑 `/tasks` 数一下实际在跑几个。
 
 ## 30 秒结论
 
@@ -30,7 +30,10 @@ flowchart TD
 
 ### 第一步：过判断矩阵
 
-四个维度逐个看，任意一个命中「该用」就值得考虑。
+四个维度逐个看，任意一个命中「该用」就值得考虑：上下文消耗（输出啰嗦且不需逐字保留才委派）、任务独立性、来回频率、上下文共享。
+
+<details>
+<summary>四维度判断矩阵展开</summary>
 
 | 维度 | 该用 SubAgent | 不该用（留在主会话） |
 |------|------------------|------------------------|
@@ -38,6 +41,8 @@ flowchart TD
 | **任务独立性** | 两个以上子任务互不依赖、各改各的文件 | 子任务有先后依赖（A 的输出是 B 的输入） |
 | **来回频率** | 任务可自包含完成、只回传一个摘要 | 需要频繁和你来回对齐、迭代细化 |
 | **上下文共享** | 各子任务不需要看到彼此的中间状态 | 规划、实现、测试共享同一份理解 |
+
+</details>
 
 **硬红线一：不要让多个并行 SubAgent 改同一批文件。** 它们看不到彼此的中间状态，只能各写各的，后写的覆盖先写的。真需要并行改同一个仓库，给每个 SubAgent 加 `isolation: worktree`（frontmatter 字段，让它在临时 git worktree 里拿一份独立仓库副本），或者干脆串行。
 
@@ -51,13 +56,18 @@ flowchart TD
 | **串行** | 存在依赖或共享资源（schema→API→前端；实现→测试→安全审计） | 把本可并行的独立工作硬串起来，浪费时间 |
 | **后台** | 你想继续干别的、让它异步跑（如调研） | 结果忘了检查就丢了 |
 
-官方建议按复杂度定规模：
+官方建议按复杂度定规模：简单事实查找 1 个、直接对比 2–4 个、复杂研究才用到 10 个以上。
+
+<details>
+<summary>官方按复杂度定规模表</summary>
 
 | 任务复杂度 | agent 数 | 每个 agent 的工具调用次数 |
 |---|---|---|
 | 简单事实查找 | 1 个 | 3–10 次 |
 | 直接对比（两三个候选方案/模块） | 2–4 个 | 各 10–15 次 |
 | 复杂研究（多领域、单上下文装不下） | 10 个以上，分工必须写明确 | 不设上限 |
+
+</details>
 
 「10 个以上」和官方复盘里的失败模式「为一个简单查询启动 50 个 SubAgent」不矛盾，线画在任务复杂度上而不是数字上。**可执行的判据**：说得出第 N 个 agent 负责哪块别人不重叠的领域、并且它能靠 10 次以上工具调用把这块填满，才留着它；说不出第 6 个和第 3 个的区别，就是多开了。日常编码里需要 10 个以上的场景基本不存在，**2 到 4 个是常态**。
 
@@ -81,13 +91,16 @@ Agent Team 默认关闭，需要设 `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` 启
 
 ### 第五步：事后回检，确认这次派活是赚的
 
+正确姿势是**派活前先跑一次 `/context` 记下百分比**，派完再跑一次对比：差值 ≤ 5 个百分点算隔离生效（经验阈值，不是官方数字）；再用 `/tasks` 核对在跑的任务数是否等于你派的数量，不相等就是它自己又派了，立即中断。
+
+<details>
+<summary>五个回检信号与用到的命令</summary>
+
 ```
 /context    # 看主上下文占用（彩色格子图 + 各项占比）
 /usage      # 看这次会话的用量；/cost 是它的别名
 /tasks      # 看后台 SubAgent 的运行/完成状态
 ```
-
-正确姿势是**派活前先跑一次 `/context` 记下百分比**，派完再跑一次对比。
 
 | 信号 | 怎么看 | 判定 |
 |---|---|---|
@@ -99,13 +112,11 @@ Agent Team 默认关闭，需要设 `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` 启
 
 一条经验判据：**如果你发现自己在给 SubAgent 补充它本该知道的背景，那这活就不该用 SubAgent** —— 要么改用 fork（继承上下文），要么直接留在主会话。
 
+</details>
+
 ### 第六步：核对接收端 —— 开得起，不代表你审得过来
 
-前五步定的是生成端上限（token、限流、文件冲突扛不扛得住）。还有一个独立的上限在你这边：**这些 agent 产出的东西，最后要一个人读懂并负责**。原则一句话 —— **让 AI 并发，不要让人的注意力并发**。
-
-落到数字上：回传摘要、不用你逐条审的后台调研，3~5 个没问题；但**需要你逐行读懂 diff 才能决定合不合的任务，同时只该有 1 个**（跑测试、批量改名这类只看成功失败的监工任务可以再叠 1 个）。这跟前面「编码场景 2 到 4 个」不冲突：那 4 个是同时在跑的生成上限，而且通常各改各的文件、最后汇成一份要你读的改动；一旦它们变成 4 份彼此独立、都得你逐行读懂的 diff，堵的就是你，不是模型。派活前先问一句：它们回来的是摘要，还是四份等我审的 diff。
-
-分层上限的完整推理链、超载的可观测信号，以及降低单次审查量的做法，见 [005 篇](../01-心智与工具/005-审查疲劳与心流.md)。
+前五步定的是生成端上限（token、限流、文件冲突扛不扛得住）。还有一个独立的上限在你这边：**这些 agent 产出的东西，最后要一个人读懂并负责**。原则一句话 —— **让 AI 并发，不要让人的注意力并发**。落到数字上：回传摘要、不用你逐条审的后台调研，3~5 个没问题；但**需要你逐行读懂 diff 才能决定合不合的任务，同时只该有 1 个**。这跟「编码场景 2 到 4 个」不冲突：那是生成端同时在跑的上限，通常最后汇成一份要你读的改动；一旦变成 4 份彼此独立、都得你逐行读懂的 diff，堵的就是你，不是模型。分层上限的完整推理链与超载的可观测信号，见 [005 篇](../01-心智与工具/005-审查疲劳与心流.md)。
 
 <details>
 <summary>三种调用方式与三个内置 SubAgent</summary>
@@ -205,7 +216,7 @@ chmod +x ./scripts/allow-readonly-git.sh   # 不加这步 hook 会直接失败�
 test -f /tmp/cc-hook-test.txt && echo "拦截失败：文件被写出来了" || echo "OK：hook 生效"
 ```
 
-预期输出 `OK：hook 生效`。输出「拦截失败」时依次查：脚本有没有可执行权限、路径是否相对于项目根目录、以及项目级 agent 的 frontmatter hook 是否还没通过 workspace trust 弹窗（较新版本里，项目级 agent 的 frontmatter hook 要先信任该目录才会运行；用户级 `~/.claude/agents/` 不需要）。
+预期输出 `OK：hook 生效`。输出「拦截失败」时依次查：脚本有没有可执行权限、路径是否相对于项目根目录、以及项目级 agent 的 frontmatter hook 是否还没通过 workspace trust 弹窗（v2.1.218 及以后，项目级 agent 的 frontmatter hook 要先信任该目录才会运行；用户级 `~/.claude/agents/` 不需要）。
 
 另外提醒：`permissions.deny` 里的规则（如 `"Bash(rm:*)"`）是**整个会话生效**，不是只对某个 agent 生效，别把它当 agent 级沙箱。
 
@@ -230,7 +241,7 @@ agent view 默认开启的情况下，当前版本直接敲 `/subtask` 就行，
 /subtask draft unit tests for the parser changes so far
 ```
 
-`CLAUDE_CODE_FORK_SUBAGENT` 现在管的是另一件事：设成 `1` 让 Claude 自己也能主动 spawn fork（并且所有 SubAgent 一律转后台跑），设成 `0` 则彻底关掉 fork 模式。这跟你手敲 `/subtask` 是两回事。
+`CLAUDE_CODE_FORK_SUBAGENT` 现在管的是 fork 模式总开关：交互会话自 v2.1.232 起默认开启；设成 `1` 让非交互（`-p`）和 Agent SDK 会话也开启，设成 `0` 则所有会话彻底关闭。这跟你手敲 `/subtask` 是两回事。
 
 **怎么验证**：`claude --version` 看是否 ≥ 2.1.212 决定敲哪个命令；fork 起来后会出现在 prompt 下方的面板里，也可以用 `/tasks` 看在跑的子任务列表，完成后结果以一条消息回到主会话。
 
@@ -264,15 +275,18 @@ using separate subagents
 
 ### SubAgent 的本质是隔离，不是加速
 
-Anthropic 的上下文工程框架把上下文操作分成四类：write、select、compress、isolate。SubAgent 就是 isolate —— 每个 SubAgent 启动时拿到一个全新的、干净的上下文窗口，看不到你的对话历史、已调用的 skill、已读过的文件，只拿到一段委派摘要就开干[^1]。
+Anthropic 的上下文工程框架把上下文操作分成四类：write、select、compress、isolate。SubAgent 就是 isolate —— 每个 SubAgent 启动时拿到一个全新的、干净的上下文窗口，看不到你的对话历史、已调用的 skill、已读过的文件，只带一段委派消息和少量固定注入就开干[^1]。
 
 它的初始上下文核心是四样：自己的 system prompt、Claude 写的委派消息、CLAUDE.md 与记忆层级、会话开始时的 git 快照。另有两样按需注入：`skills` 字段预加载的 skill 内容，以及可用于 `SendMessage` 的兄弟 agent 名册。
 
 直接收益是：跑全量测试、读 10 万行日志、爬一堆文档的输出全留在它自己的窗口里，主会话只收摘要。还有一个容易忽略的工程性质 —— SubAgent 的对话记录存在独立文件里，主会话做 compact 时它不受影响，是一个扛得住压缩的工作面（见 [012 篇](../02-上下文工程/012-上下文窗口要爆了.md)）。
 
-### 隔离的代价是 15 倍 token，而且它会自己长大
+### 隔离的代价：数倍起步、研究型多 Agent 约 15 倍，而且它会自己长大
 
-Anthropic 在自家多 Agent 研究系统的复盘里给了最硬的量化：agent 的 token 消耗约是普通聊天的 4 倍，多 Agent 系统约是 15 倍；官方还直接点名，编码任务真正能并行的子任务比研究任务少得多[^2]。
+Anthropic 在自家多 Agent 研究系统的复盘里给了最硬的量化：agent 的 token 消耗约是普通聊天的 4 倍，研究型多 Agent 系统约是 15 倍；官方还直接点名，编码任务真正能并行的子任务比研究任务少得多[^2]。共同的失效模式是：**并行的开销是乘法的，但失败是全局的** —— 扇出越宽，任意一个分支跑偏或空转，代价越是按分支数整体翻倍。
+
+<details>
+<summary>7×/15× 两个数的区别、三个结构性原因与三个扇出案例</summary>
 
 **注意别和另一个数字搞混**：本库 060、061、062 三篇讲成本时用的是「agent teams 约 7 倍 token」，那是 Claude Code 官方 costs 文档针对 plan mode 下 agent teams 给的数；这里的 15 倍来自 Anthropic 多 Agent 研究系统的复盘，指的是研究型多 Agent 架构。两个数各有官方出处，量的是不同东西，别当成矛盾，也别互相套用。
 
@@ -280,7 +294,7 @@ Anthropic 在自家多 Agent 研究系统的复盘里给了最硬的量化：age
 
 更贵的一类是「你只派了 1 个，它自己长成了几十个」。有用户只发了一句「research Venmo integration options」，最后同时在跑 48 个以上后台 agent，其中大量重复劳动 —— 4 个在查同一个 Wise API、3 个在查同一个 Apple Pay P2P，新 agent 冒出来的速度比他手动停的速度还快，同样情况在不同会话里复现了两次[^3]。同期还有两个同族案例：Agent Teams 带 5 到 8 个队友时，主会话被队友的 idle 通知反复唤醒，13% 到 22% 的输入 token 花在纯粹的「收到」上；deep-research 工作流一次扇出约 75 个并发校验 agent，只要其中任何一个没按 schema 返回结构化输出，整轮直接中止，三次尝试烧掉约 350 万 token、零可用产出。
 
-共同点是同一个失效模式：**并行的开销是乘法的，但失败是全局的。** 扇出越宽，任意一个分支跑偏或空转，代价越是按分支数整体翻倍。
+</details>
 
 ### 什么时候多 Agent 真的值
 
@@ -294,7 +308,7 @@ Anthropic 在自家多 Agent 研究系统的复盘里给了最硬的量化：age
 
 ## 别这么干
 
-- ❌ **把多 Agent 当加速器用。** 代价是 15 倍 token。它买的是「单上下文装不下」任务的能力边界，简单任务用多 Agent 只会更慢更贵。
+- ❌ **把多 Agent 当加速器用。** 研究型多 Agent 系统官方实测约 15 倍 token，编码场景可并行子任务更少、收益更差。它买的是「单上下文装不下」任务的能力边界，简单任务用多 Agent 只会更慢更贵。
 - ❌ **让一个全工具的 SubAgent 自己再派活。** 它拿得到派活工具就会继续派，形成没有深度上限的扇出树。用 `tools` 白名单掐掉，派完用 `/tasks` 数一下实际跑了几个。
 - ❌ **让多个 SubAgent 改同一批文件。** 它们看不到彼此的中间状态，后写的盖掉先写的。并行的硬规则是各改各的文件。
 - ❌ **给 SubAgent 模糊的委派指令。** 它看不到你的对话历史。「Fix authentication」是坏指令，好指令带目标、文件范围、输出格式、边界。
@@ -328,7 +342,7 @@ Anthropic 在自家多 Agent 研究系统的复盘里给了最硬的量化：age
 | **并行规模** | 受本地资源约束；Agent Team 建议 3-5 个队友起步 | Composer 一个 prompt 最多 8 个 agent 并行（worktree/远程机隔离） | 单任务为主 |
 | **agent 间通信** | SubAgent 只能回传主 Agent；Agent Team 可互发消息 | 各自独立产出 PR，无原生互发消息 | 无 |
 | **异步/后台** | `Ctrl+B` 后台跑；frontmatter `background: true`；`/subtask` 起 fork 异步 | 云端异步，关电脑也继续跑；产出截图/视频证据 | 云端异步 |
-| **Token 成本透明度** | 官方明确：多 Agent 约 15× 聊天 token；Agent Team 线性随队友数增长 | 按订阅/额度计，单任务成本不透明 | 按额度计 |
+| **Token 成本透明度** | 官方明确：多 Agent 约 15× 聊天 token（研究系统复盘数据）；Agent Team 线性随队友数增长 | 按订阅/额度计，单任务成本不透明 | 按额度计 |
 
 三点观察：
 
@@ -353,18 +367,21 @@ Anthropic 在自家多 Agent 研究系统的复盘里给了最硬的量化：age
 
 **参考资料**
 
-- [Create custom subagents — Claude Code Docs](https://code.claude.com/docs/en/sub-agents) —— 支撑全新隔离上下文、内置 agent、frontmatter 字段清单、fork、`isolation: worktree`、何时留主会话（官方，2026-06，2026-08 复核）
+- [Create custom subagents — Claude Code Docs](https://code.claude.com/docs/en/sub-agents) —— 支撑全新隔离上下文、初始上下文四样+两样按需注入、内置 agent、frontmatter 字段清单、fork 命令演变与 `CLAUDE_CODE_FORK_SUBAGENT` 语义、fork 复用父会话 prompt cache、transcript 独立文件存储与抗 compact、workspace trust、`isolation: worktree`、何时留主会话（官方，2026-06，2026-08-15 复核）
 - [How we built our multi-agent research system — Anthropic](https://www.anthropic.com/engineering/multi-agent-research-system) —— 支撑 15× token、90.2% 是研究类评测、token 解释 80% 差异、按复杂度定规模表、委派四要素、game of telephone、同步瓶颈（官方，2025）
-- [Orchestrate teams of Claude Code sessions — Claude Code Docs](https://code.claude.com/docs/en/agent-teams) —— 支撑 SubAgent vs Agent Team 对照表、`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`、token 线性增长（官方，2026-06）
+- [Orchestrate teams of Claude Code sessions — Claude Code Docs](https://code.claude.com/docs/en/agent-teams) —— 支撑 SubAgent vs Agent Team 对照表、`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`、token 随队友数线性增长、3–5 个队友起步（官方，2026-06，2026-08-15 复核）
+- [Manage costs effectively — Claude Code Docs](https://code.claude.com/docs/en/costs) —— 支撑「agent teams 在 plan mode 下约 7× token」（官方，2026-08-15 复核）
 - [Effective context engineering for AI agents — Anthropic](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents) —— 支撑 write/select/compress/isolate 四原则，SubAgent = isolate（官方，2025-09）
 - [Best practices for Claude Code — Claude Code Docs](https://code.claude.com/docs/en/best-practices) —— 支撑对抗式 review 的 subagent 范式（官方，2026-06）
 - [Slash commands — Claude Code Docs](https://code.claude.com/docs/en/commands) —— 支撑第五步回检用的 `/context` / `/usage`（`/cost` 是别名）/ `/tasks`（官方，2026-08 复核）
 - [Hooks reference — Claude Code Docs](https://code.claude.com/docs/en/hooks) —— 支撑 `PreToolUse` 输入 JSON schema 与退出码 2 的拦截语义（官方，2026-08 复核）
+- [Claude Code CHANGELOG](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md) —— 支撑 fork 命令版本演变：v2.1.117 起 `CLAUDE_CODE_FORK_SUBAGENT=1` 可启用、v2.1.212 起 `/subtask` 接替 `/fork` 的会话内子任务、v2.1.232 起 fork 默认开启（官方，2026-08-15 复核）
 - [Subagents in the SDK — Claude Code Docs](https://code.claude.com/docs/en/agent-sdk/subagents) —— 支撑 SDK 里定义与调用 SubAgent 的隔离和并行（官方，2026）
 - [Claude Code Sub-Agents: Parallel vs Sequential Patterns — Claude Fast](https://claudefa.st/blog/guide/agents/sub-agent-best-practices) —— 支撑并行/串行/后台路由表与「失败多是 invocation 失败」（社区，2026-06，路由表为该站整理）
 - [General-purpose sub-agents recursively spawn unbounded child agents #68110](https://github.com/anthropics/claude-code/issues/68110) —— 支撑一句调研请求扇出 48+ 并发 agent（社区，2026-06，issue 状态 open）
 - [Agent Teams: lead session loops on idle notifications #47930](https://github.com/anthropics/claude-code/issues/47930) —— 支撑 5–8 队友时 13%–22% 输入 token 花在确认上（社区，2026-04）
 - [deep-research workflow aborts entire run and burns millions of tokens #65500](https://github.com/anthropics/claude-code/issues/65500) —— 支撑约 75 个并发校验 agent 单点失败导致约 350 万 token 零产出（社区，2026-06）
+- [About Copilot coding agent — GitHub Docs](https://docs.github.com/en/copilot/concepts/agents/coding-agent/about-coding-agent) —— 支撑横向对比里 Copilot 的云沙箱（GitHub Actions 临时环境）与自主 issue→PR 工作流；官方现称 Copilot cloud agent（官方，2026-08-15 复核）
 - [Run cloud agents in your own infrastructure — Cursor](https://cursor.com/blog/self-hosted-cloud-agents) —— 支撑横向对比里 Cursor Cloud Agents 的隔离 VM 与自托管（官方，2025-2026）
 - [Cursor Cloud Agents: Build and Test in Isolated VMs — Digital Applied](https://www.digitalapplied.com/blog/cursor-cloud-agents-isolated-vms-guide) —— 支撑 Cursor 云 Agent 的 disposable filesystem 与 PR 工作流（社区，2025-2026）
 - [Parallel AI Agents in Cursor 2.0 — Medium](https://medium.com/towards-data-engineering/parallel-ai-agents-in-cursor-2-0-a-practical-guide-e808f89cffb9) —— 支撑 Cursor 2.0 最多 8 个并行 agent（社区，2025）
@@ -380,6 +397,6 @@ Anthropic 在自家多 Agent 研究系统的复盘里给了最硬的量化：age
 
 <sub>难度 高级 · 决策题 · 主线 Claude Code，横向 Cursor / Copilot</sub>
 
-<sub>**时效**：版本相关事实（Explore 自 v2.1.198 起继承主会话模型且在 Claude API 上封顶 Opus、agent frontmatter 支持的字段清单、fork 自 v2.1.212 起命令改名为 `/subtask`、Explore/Plan 跳过 CLAUDE.md 与 git status、项目级 frontmatter hook 自 v2.1.218 起需 workspace trust）已于 2026-08-03 对照官方 sub-agents 文档逐项复核。**已知不确定**：48 个 agent 扇出、13%–22% idle token、约 350 万 token 零产出三个案例均来自 GitHub issue，属社区单点实测，未见官方确认；第五步「差值 ≤ 5 个百分点」是本篇给的经验阈值，不是官方数字；第六步的接收端上限（深度审读同时 1 个、后台调研 3~5 个）出自个人实践，推理链见 005 篇；并行/串行/后台路由表出自社区站点整理。**易变**：Claude Code 版本号类细节迭代快，fork 命令名与 agent frontmatter 字段清单用前回查官方文档。</sub>
+<sub>**时效**：版本相关事实（Explore 自 v2.1.198 起继承主会话模型且在 Claude API 上封顶 Opus、agent frontmatter 支持的字段清单、fork 自 v2.1.212 起命令改名为 `/subtask`、fork 模式自 v2.1.232 起交互会话默认开启、Explore/Plan 跳过 CLAUDE.md 与 git status、项目级 frontmatter hook 自 v2.1.218 起需 workspace trust、fork 复用父会话 prompt cache、SubAgent transcript 独立文件存储且不受主会话 compact 影响）已于 2026-08-15 对照官方 sub-agents 文档逐项复核；agent teams 的 token 线性增长与 3–5 个队友、agent teams 约 7×（plan mode）已于 2026-08-15 对照官方 agent-teams 与 costs 文档复核；横向对比里的 Copilot 条目已对照 GitHub 官方文档（该产品官方现称 Copilot cloud agent）。**已知不确定**：48 个 agent 扇出、13%–22% idle token、约 350 万 token 零产出三个案例均来自 GitHub issue，属社区单点实测，未见官方确认；第五步「差值 ≤ 5 个百分点」是本篇给的经验阈值，不是官方数字；第六步的接收端上限（深度审读同时 1 个、后台调研 3~5 个）出自个人实践，推理链见 005 篇；并行/串行/后台路由表出自社区站点整理。**易变**：Claude Code 版本号类细节迭代快，fork 命令名与 agent frontmatter 字段清单用前回查官方文档。</sub>
 
 > 本篇个人实践（L4）：`[待补：BOSS 的实战经验——你哪次用 SubAgent 救了爆掉的上下文 / 或反过来多 Agent 烧了 15 倍 token 却没拿到收益的踩坑案例]`

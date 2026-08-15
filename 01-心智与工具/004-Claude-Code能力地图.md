@@ -1,6 +1,6 @@
 # 004. CLAUDE.md、skill、subagent、hooks、plan mode——这几个到底该用哪个？
 
-**一句话**：别按文档目录学这六个功能，按「我要解决什么」分四类挑 —— 管上下文用 CLAUDE.md / auto memory，管节奏与闸门用权限档 / hooks，管复用用 skill，管隔离与并行用 subagent；先问问题，答案自然指向某一类。
+**一句话**：标题这五个加 auto memory 共六个功能，别按文档目录挨个学，按「我要解决什么」分四类挑 —— 管上下文用 CLAUDE.md / auto memory，管节奏与闸门用权限档 / hooks，管复用用 skill，管隔离与并行用 subagent；先问问题，答案自然指向某一类。
 
 ## 30 秒结论
 
@@ -30,7 +30,7 @@ flowchart TD
 
 主干按上面的决策树走：第一个答「是」的就是答案。四问都答「否」，那你要的不是新增配置，而是换个权限档 —— 动手前想清楚方向用 `plan`，正在迭代改代码用 `acceptEdits`，长任务想少被打断用 `auto`。
 
-下面是三个最容易卡住的岔口，和三段可直接复制的起步件。
+下面是三个最容易卡住的岔口；三段可直接复制的起步件折叠在岔口之后。
 
 ### 岔口一：既要复用、又会产生大量输出，选 skill 还是 subagent
 
@@ -43,6 +43,9 @@ flowchart TD
 ### 岔口三：CLAUDE.md 里写了规则它还是不听，加强语气有用吗
 
 没用，换机制。官方在 memory 页写得很直：CLAUDE.md 是在系统提示之后以用户消息形式送进去的，不保证严格遵守[^3]。正确动作是先跑 `/context` 确认文件真的加载了（看 **Memory files** 那一栏），再判断这条规则是不是本来就该做成 hook —— 写在 CLAUDE.md 或 skill 里的「never edit `.env`」是一个请求，不是保证；`PreToolUse` hook 才是强制[^1]。
+
+<details>
+<summary>三段可直接复制的起步件：hooks / skill / subagent</summary>
 
 ### 起步件 1：hooks 最小可跑配置
 
@@ -69,7 +72,7 @@ flowchart TD
 }
 ```
 
-字段含义：`matcher` 是工具名；`if` 是权限规则语法的过滤条件（如 `Bash(git *)`、`Edit(*.ts)`），不写就对该工具的所有调用都跑；`type` 除 `command` 外还支持 `http` / `mcp_tool` / `prompt` / `agent`；`timeout` 单位是秒，command 类默认 600。
+字段含义：`matcher` 是工具名；`if` 是权限规则语法的过滤条件（如 `Bash(git *)`、`Edit(*.ts)`），不写就对该工具的所有调用都跑；`type` 除 `command` 外还支持 `http` / `mcp_tool` / `prompt` / `agent`；`timeout` 单位是秒，command 类默认 600[^5]。
 
 **怎么确认生效**：会话里输入 `/hooks`，你这条应该出现在 `PreToolUse` 下、来源标 Project Settings。`/hooks` 里根本看不到它，通常是 JSON 语法错了或放错了文件，不是 hook 没触发。注意这个菜单是只读的，改还是得改 JSON。
 
@@ -92,7 +95,7 @@ description: 提 PR 前的自检清单：跑测试、跑 lint、检查是否漏�
 EOF
 ```
 
-`name` 和 `description` 必填，可选的还有 `allowed-tools`（这一轮内免权限提示的工具）、`disallowed-tools`。目录名决定命令名，所以这个装完就是 `/pr-check`。
+frontmatter 所有字段都可省，官方只把 `description` 标为建议填写（Claude 靠它判断何时自动加载）；`name` 只是列表里的展示名，个人/项目 skill 的命令名来自目录名，所以这个装完就是 `/pr-check`。其他可选字段还有 `allowed-tools`（这一轮内免权限提示的工具）、`disallowed-tools` 等。
 
 **怎么确认生效**：会话里敲 `/pr-`，自动补全里出现 `pr-check` 并显示你写的 description。Claude Code 监听 `~/.claude/skills/` 和项目 `.claude/skills/` 的文件变化，本会话内即时生效，不用重启 —— 唯一例外是这个顶层 skills 目录在会话启动时还不存在，那种情况要重启一次。
 
@@ -115,16 +118,18 @@ model: sonnet
 
 **怎么确认生效**：主会话里说 `Use the code-reviewer subagent to review the authentication module`，主会话里应该只多出一段摘要而不是几百行源码。注意 v2.1.198 起 `/agents` 不再是创建向导，敲它只会提示你去问 Claude 或直接编辑 `.claude/agents/`；文件位置和字段没变。找不到新建的 subagent，多半是 `~/.claude/agents/` 在会话启动前还不存在，重启一次即可。
 
+</details>
+
 <details>
 <summary>完整能力表：六项的官方定位、何时用、深用指针</summary>
 
 | 能力 | 分类 | 一句话定位 | 何时用 | 深用指针 |
 |------|------|------|--------|----------|
 | **CLAUDE.md** | 管上下文 | 你写的持久指令，每次会话开始时自动加载全文 | 项目事实、技术栈、构建命令、团队约定要每次生效时写进去。目标 200 行以内 | [010](../02-上下文工程/010-CLAUDE-md怎么写才生效.md) |
-| **auto memory** | 管上下文 | Claude 自己写的跨会话笔记，默认开启，存在 `~/.claude/projects/<project>/memory/`，每次会话只加载 `MEMORY.md` 的前 200 行或 25KB。与 CLAUDE.md 的差别就一句：**CLAUDE.md 是你写规则，auto memory 是它记发现** | 你不想手动维护、但希望它自己攒下来的东西：构建命令、调试踩坑、你纠正过的偏好。单项目关掉就在 `.claude/settings.json` 写 `{"autoMemoryEnabled": false}` | [013](../02-上下文工程/013-哪些决策要写进memory.md) |
+| **auto memory** | 管上下文 | Claude 自己写的跨会话笔记，默认开启，存在 `~/.claude/projects/<project>/memory/`，每次会话只加载 `MEMORY.md` 的前 200 行或 25KB（先到为准）[^6]。与 CLAUDE.md 的差别就一句：**CLAUDE.md 是你写规则，auto memory 是它记发现** | 你不想手动维护、但希望它自己攒下来的东西：构建命令、调试踩坑、你纠正过的偏好。单项目关掉就在 `.claude/settings.json` 写 `{"autoMemoryEnabled": false}` | [013](../02-上下文工程/013-哪些决策要写进memory.md) |
 | **permission modes**（含 plan） | 管节奏 | 控制 Claude 多频繁停下来问你的权限档，官方表里共 6 档：`default`（每次首用某个工具时停下来问你，能写文件只是要确认，CLI 里标签叫 Manual）、`acceptEdits`、`plan`（真正只读的那一档）、`auto`、`dontAsk`、`bypassPermissions`。**plan 就是其中一档**，不是叠在别的档上的修饰。**2026-08-14 起新会话的默认档变了**，见表下说明 | 敏感活用 `default`；迭代改代码用 `acceptEdits`；动手前先想清楚用 `plan`；长任务减少打断用 `auto`；CI 脚本用 `dontAsk`；`bypassPermissions` 只在容器或虚拟机里用。会话里按 `Shift+Tab` 循环 `default → acceptEdits → plan`，所以进 plan 是连按两次 | [031](../04-执行工作流/031-plan-execute-review循环.md) |
 | **hooks** | 管节奏 | 写在 settings.json 的 `hooks` 键下的确定性闸门，在 `PreToolUse`、`PostToolUse`、`Stop`、`SessionStart` 等生命周期事件上跑东西，由 Claude Code 本身执行，不靠 Claude 自觉 | 必须每次都发生、且不需要 Claude 动脑的事：编辑后跑 lint、拦掉危险命令、会话结束发通知 | 本库暂无独立篇；配置写法见 [010](../02-上下文工程/010-CLAUDE-md怎么写才生效.md)，跑测试类 hook 见 [033](../04-执行工作流/033-Skill与superpowers怎么用.md) |
-| **skill** | 管复用 | 按需加载的流程和参考资料，会话开始只加载描述、用到才加载正文 | 同一段流程或检查清单反复粘贴（3 次以上），或 CLAUDE.md 某节变成了流程。项目级 `.claude/skills/<名字>/SKILL.md`，个人级 `~/.claude/skills/<名字>/SKILL.md` | [033](../04-执行工作流/033-Skill与superpowers怎么用.md) |
+| **skill** | 管复用 | 按需加载的流程和参考资料，会话开始只加载描述、用到才加载正文 | 同一段流程或检查清单粘到第 3 次，或 CLAUDE.md 某节变成了流程。项目级 `.claude/skills/<名字>/SKILL.md`，个人级 `~/.claude/skills/<名字>/SKILL.md` | [033](../04-执行工作流/033-Skill与superpowers怎么用.md) |
 | **subagent** | 管并行与隔离 | 独立上下文窗口的 worker，只把摘要回给主会话 | 冗长输出要隔离（跑测试、读大量日志）、有两个以上独立子任务要并行、或需要一个工具受限的专用 worker | [032](../04-执行工作流/032-SubAgent并行开几个.md) |
 
 **默认档在 2026-08-14 变了**：在此之前，新会话一律从 `default`（Manual，每次首用某个工具都停下来问）起步。从这天起，Pro / Max / Team 计划的新会话默认档改成 `auto` —— 工具调用由后台分类器判断放行，只在它认为动作与你的请求不符时才拦。三种情况不受影响：你自己在设置里写过 `defaultMode` 的（会收到一次性切换提示，不接受就保持原样）、组织用 managed settings 托管了默认档的、以及走 Bedrock / Vertex / Foundry / 网关这些通道的（那边 `auto` 只是出现在 `Shift+Tab` 循环里，起始档仍是 Manual）[^4]。**影响是双向的**：想少被打断的人不用再配了；而习惯「默认档会拦住我」的人，那层弹窗确认没了，敏感目录下要主动 `Shift+Tab` 切回 Manual，或用 `permissions.disableAutoMode` 关掉。分类器默认拦什么、放什么，见 [083](../09-工具可靠性/083-permissions和hooks拦不住.md)。
@@ -258,10 +263,10 @@ Claude Code 的差异在于这四类是各自独立的机制，而不是揉进�
 
 - [CC Docs: Extend Claude Code（features-overview）](https://code.claude.com/docs/en/features-overview) —— 本篇四类分类框架的主要官方依据："Build your setup over time" 触发表、Skill vs Subagent / CLAUDE.md vs Skill / Hook vs Skill 三组对照、各能力上下文开销表（官方，2026-08 访问）
 - [CC Docs: Choose a permission mode](https://code.claude.com/docs/en/permission-modes) —— 6 档权限模式表、`plan` 是其中一档、`Shift+Tab` 循环顺序、`--permission-mode` 与 `defaultMode`、bypass 会话下 plan 拦截失效（官方，2026-08 访问）
-- [CC Docs: Hooks reference](https://code.claude.com/docs/en/hooks) —— 起步件 1 那段 JSON 的结构与字段（`matcher` / `type` / `if` / `timeout` / `statusMessage`）、事件名全表、`/hooks` 只读浏览器（官方，2026-08 访问）
-- [CC Docs: Extend Claude with skills](https://code.claude.com/docs/en/skills) —— 起步件 2 的存放路径、frontmatter 字段、目录名即命令名、文件变更即时生效，以及岔口二的分界线（官方，2026-08 访问）
-- [CC Docs: Create custom subagents](https://code.claude.com/docs/en/sub-agents) —— 起步件 3 的路径与 frontmatter、「支线任务会淹掉主会话」的定位、岔口一的反向信号、v2.1.198 起 `/agents` 不再是向导（官方，2026-08 访问）
-- [CC Docs: How Claude remembers your project](https://code.claude.com/docs/en/memory) —— CLAUDE.md vs auto memory 对照、200 行建议、`/context` 的 Memory files 排查法、岔口三的「不保证严格遵守」（官方，2026-08 访问）
+- [CC Docs: Hooks reference](https://code.claude.com/docs/en/hooks) —— 起步件 1 那段 JSON 的结构与字段（`matcher` / `type` / `if` / `timeout` / `statusMessage`）、事件名全表、`/hooks` 只读浏览器（官方，2026-08-15 访问）
+- [CC Docs: Extend Claude with skills](https://code.claude.com/docs/en/skills) —— 起步件 2 的存放路径、frontmatter 字段（全部可省、`description` 标 Recommended）、目录名即命令名、文件变更即时生效及「顶层目录会话启动时不存在需重启」的例外、`context: fork`，以及岔口二的分界线（官方，2026-08-15 访问）
+- [CC Docs: Create custom subagents](https://code.claude.com/docs/en/sub-agents) —— 起步件 3 的路径与 frontmatter、「支线任务会淹掉主会话」的定位、岔口一的反向信号、`skills:` 预加载字段、v2.1.198 起 `/agents` 不再是向导（官方，2026-08-15 访问）
+- [CC Docs: How Claude remembers your project](https://code.claude.com/docs/en/memory) —— CLAUDE.md vs auto memory 对照、CLAUDE.md 建议 200 行以内（原文 "target under 200 lines per CLAUDE.md file"）、`MEMORY.md` 前 200 行 / 25KB 加载上限、`/context` 的 Memory files 排查法、岔口三的「不保证严格遵守」（官方，2026-08-15 访问）
 - [CC Docs: Best practices for Claude Code](https://code.claude.com/docs/en/best-practices) —— 「表里为什么没有 TDD」注解引的「给 Claude 一个能判定通过或失败的东西，循环就会自己收口」（官方，2026-08 访问）
 - [Anthropic Blog: Steering Claude Code](https://claude.com/blog/steering-claude-code-skills-hooks-rules-subagents-and-more) —— 官方博客版的选型走查，features-overview 页在「Compare similar features」一节点名推荐（官方博客，2026）
 - [Anthropic: Skills explained](https://claude.com/blog/skills-explained) —— 「表里也没有 MCP」那条注解的依据：MCP 把 Claude 接到数据，skill 教 Claude 拿这数据干什么（官方，2026-03）
@@ -269,12 +274,14 @@ Claude Code 的差异在于这四类是各自独立的机制，而不是揉进�
 [^1]: [CC Docs: Extend Claude Code](https://code.claude.com/docs/en/features-overview)（官方，2026-08 访问）："Build your setup over time" 用「触发条件 → 加什么」组织；并明确 CLAUDE.md 或 skill 里的 "never edit `.env`" 是一个请求而非保证，`PreToolUse` hook 才是强制。
 [^2]: [CC Docs: Extend Claude with skills](https://code.claude.com/docs/en/skills)（官方，2026-08 访问）：当你反复往聊天里粘同一套指令、清单或多步流程，或者 CLAUDE.md 里某节从一条事实长成了一套流程时，就该做一个 skill。
 [^3]: [CC Docs: How Claude remembers your project](https://code.claude.com/docs/en/memory)（官方，2026-08 访问）：CLAUDE.md 在系统提示之后以用户消息形式送入，不保证严格遵守。
-[^4]: [CC Docs: Permission modes](https://code.claude.com/docs/en/permission-modes)（官方，2026-08-13 访问）原文：「Starting August 14, 2026, auto mode becomes the default permission mode for new sessions on Pro, Max, and Team plans. You can switch modes at any time. A default you set yourself stays in place unless you accept the one-time switch prompt, and a default your organization manages is unchanged.」同页另注明，Bedrock / Vertex / Foundry / 网关通道上 `auto` 只是默认出现在 `Shift+Tab` 循环里，会话起始档仍是 `defaultMode`（默认 Manual）。
+[^4]: [CC Docs: Permission modes](https://code.claude.com/docs/en/permission-modes)（官方，2026-08-15 复核）。切换生效后当前页表述为「On Pro, Max, and Team plans, the built-in starting mode is auto mode」，并列出起始档判定表：任一设置文件把 `disableAutoMode` 设为 `"disable"`、走 `claude -p` / Agent SDK、走 Bedrock / Vertex（Agent Platform）/ Foundry / 网关通道、或 Enterprise 计划与 Console API key，起始档均仍为 `default`（Manual）；自己在设置里写过 `defaultMode` 的按设置优先。2026-08-13 访问时的公告原文为「Starting August 14, 2026, auto mode becomes the default permission mode for new sessions on Pro, Max, and Team plans.」
+[^5]: [CC Docs: Hooks reference](https://code.claude.com/docs/en/hooks)（官方，2026-08-15 访问）原文：「Defaults: 600 for `command`, `http`, and `mcp_tool`; 30 for `prompt`; 60 for `agent`.」（`UserPromptSubmit` / `MessageDisplay` 事件会把默认值降到 30 / 10 秒）。`if` 字段（权限规则语法过滤，如 `Bash(git *)`、`Edit(*.ts)`）与 `type` 支持 `command` / `http` / `mcp_tool` / `prompt` / `agent` 五种，均见同页 Common fields 表。
+[^6]: [CC Docs: How Claude remembers your project](https://code.claude.com/docs/en/memory)（官方，2026-08-15 访问）原文：「The first 200 lines of `MEMORY.md`, or the first 25KB, whichever comes first, are loaded at the start of every conversation.」超限部分下次加载直接丢弃；该限制只作用于 `MEMORY.md`，CLAUDE.md 无论多长都全量加载。
 
 ---
 
 <sub>难度 中级 · 配置题 + 决策题 · 主线 Claude Code，横向 Cursor / Copilot</sub>
 
-<sub>**时效**：2026-08-03 复核，权限档默认值一项 2026-08-13 复核。权限档、hooks JSON 结构、skill / subagent 文件路径与 frontmatter 字段均对照官方文档原页逐条核对（permission-modes / hooks / skills / sub-agents / memory / features-overview 六页）。**已知不确定**：四类分类框架是本库在官方触发表之上的再归纳，不是官方术语。**易变**：具体路径、字段名、快捷键、`/agents` 之类命令的行为随版本变化，涉及版本行为处已标最低版本号，以官方文档为准。</sub>
+<sub>**时效**：2026-08-15 复核（hooks 字段与超时默认值、`MEMORY.md` 加载上限、skill frontmatter、`/agents` 行为、权限档默认值均对照官方当页原文核过）。权限档、hooks JSON 结构、skill / subagent 文件路径与 frontmatter 字段均对照官方文档原页逐条核对（permission-modes / hooks / skills / sub-agents / memory / features-overview 六页）。**已知不确定**：四类分类框架是本库在官方触发表之上的再归纳，不是官方术语。**易变**：具体路径、字段名、快捷键、`/agents` 之类命令的行为随版本变化，涉及版本行为处已标最低版本号，以官方文档为准。</sub>
 
 > 本篇个人实践（L4）：`[待补：BOSS 的能力地图使用顺序 / 哪个能力最先上手 / 哪个最后才用]`

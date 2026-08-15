@@ -15,10 +15,11 @@
 ```mermaid
 flowchart TD
     A[验证又没过] --> B{同一问题<br/>纠正过 2 次吗}
+    A --> E{修复尝试<br/>满 3 次了吗}
     B -->|没有| C[再改一轮<br/>但必须看证据]
     B -->|有| D[先抢救事实<br/>再 clear]
-    D --> E{修复尝试<br/>满 3 次了吗}
-    E -->|没满| F[新会话<br/>带书面上下文重来]
+    D --> F[新会话<br/>带书面上下文重来]
+    E -->|没满| C
     E -->|满了| G[停手质疑架构<br/>别试第 4 次]
     G --> H{报错位置<br/>在漂移吗}
     H -->|在漂移| I[换系统化调试法<br/>先假设后动手]
@@ -37,14 +38,15 @@ flowchart TD
 |------|-----------|-----------|
 | L1（最早） | 同一个 bug 纠正 Claude 2 次仍错 | `/clear`，把已验证的事实抢救出来写进 SPEC / CLAUDE.md，新会话用书面上下文重来[^1] |
 | L2 | 修复尝试满 3 次仍不对 | 停下质疑问题定义和架构，回到根因分析，不要去试第 4 次修复[^2] |
-| L3 | 迭代次数到上限（建议 5 次） | 停下，让 AI 报告"学到了什么"，人介入提供方向 |
+| L3 | 迭代次数到上限（建议 5 次） | 停下，让 AI 报告"学到了什么"，人介入提供方向[^6] |
 | L4（最严重） | 几十轮还在转圈，或每个修复都在新地方冒出新问题，或 L1–L3 的动作都走过一遍仍不收敛 | 停下，人自己看代码、定位、设计方案，再让 AI 落地 |
 
-官方对 L1 的表述是：一个干净的会话配一个更好的 prompt，几乎总是胜过一个攒满修正的长会话。obra 对 L2 的表述是：修复次数达到或超过 3 次就停下并质疑架构，不经过架构层面的讨论不要去试第 4 次。
+官方对 L1 的表述是：一个干净的会话配一个更好的 prompt，几乎总是胜过一个攒满修正的长会话。obra 对 L2 的表述是：修复次数达到或超过 3 次就停下并质疑架构，不经过架构层面的讨论不要去试第 4 次。L3 的 5 次上限来自社区方法论，不是官方数字，当默认值用、可按项目调。
 
 这四条硬触发靠人记着数次数很容易漏，可以用 Stop hook 把"这轮还剩哪些收尾没做"以 `additionalContext` 注入回去（不是 `decision: block`），配置见 [#083 我配了 deny 规则，它照样删了我的东西](../09-工具可靠性/083-permissions和hooks拦不住.md) 的第 6 步「hook 的三个正面用法」。
 
-还有一张按问题类型的表，决定这一类 bug 值不值得继续交给 AI：
+<details>
+<summary>按问题类型判断：这一类 bug 值不值得继续交给 AI</summary>
 
 | 问题类型 | 该不该继续让 AI 改 | 理由 |
 |---------|-------------------|------|
@@ -53,6 +55,8 @@ flowchart TD
 | 逻辑 bug，3 轮没修好 | 换模型或换工具 | 多半撞上根因 ② 或 ③ |
 | 几十轮还在转圈 | 停，自己看代码、定位后再给 AI 修 | 根因 ①②③ 叠加，硬刚无效 |
 | 架构层面的 bug | 人设计方案，再让 AI 落地 | 根因 ③，问题定义本身要重来 |
+
+</details>
 
 ### 第 2 步：诊断根因，按根因选跳出策略
 
@@ -88,7 +92,7 @@ flowchart TD
 修完为「上传 10MB」场景加测试，跑测试给我看输出。
 ```
 
-**证据**：第二步之后你看到的应该是测试的实际输出，而不是"我修好了"这句话[^3]。只有宣告没有回显，就是这一轮没验证过，别接着往下走。
+**证据**：第二步之后你看到的应该是测试的实际输出，而不是"我修好了"这句话[^5]。只有宣告没有回显，就是这一轮没验证过，别接着往下走。
 
 <details>
 <summary>完整走一遍：识别并跳出一个 fix loop</summary>
@@ -126,7 +130,7 @@ flowchart TD
 - **何时启用**：你有时间压力、"就快速改一下"看起来很显然、你已经试过多次修复、上一次修复没起作用、你还没完全搞懂这个问题。这几条正好对应已经陷在 fix loop 里的状态。
 - **何时停手换法**：修复失败达到或超过 3 次，停下并质疑架构，不经过架构讨论不要试第 4 次。
 - **Iron Law**：没有先做根因调查，就不允许动手修。
-- **为什么系统性方法反而快**：obra 给的对比是系统性方法修一个 bug 要 15 到 30 分钟，随机乱改要 2 到 3 小时反复折腾，一次修对的成功率 95% 对 40%。这组数字来自 skill 文档本身，未见独立复现，当量级参考。
+- **为什么系统性方法反而快**：obra 早期版本给的对比是系统性方法修一个 bug 要 15 到 30 分钟，随机乱改要 2 到 3 小时反复折腾，一次修对的成功率 95% 对 40%。注意：作者已在 2026-07 以"去掉社交证明"为由把这组数字从 skill 文档删除，现行版本没有它，未见独立复现，只当量级参考。
 
 </details>
 
@@ -156,7 +160,7 @@ flowchart TD
 
 别因噎废食。fixloop 这个词本来是正面的：让 AI 自己看它有没有修好问题，没修好就再试一次[^4]。官方是同一个意思 —— 给 Claude 一个能产出通过或失败的东西，这个循环就会自己闭合，它干活、跑检查、读结果、迭代，直到检查通过。[#030](../04-执行工作流/030-AI写的测试不可信.md) 里的红绿信号就是这种 pass/fail。
 
-失控只发生在三个条件同时缺失时[^4]：
+失控的会话缺的通常是下面三样中的一样或几样[^4]：
 
 1. **缺真实的验证信号** —— AI 靠"看起来做完了"自报修好，而不是真去跑 pass/fail。
 2. **缺迭代上限** —— 循环跑飞，AI 反复幻想出同一个修复方案。
@@ -193,10 +197,11 @@ flowchart TD
 - [#022 怎么把一个大需求拆成 AI 能一次做对的子任务？](../03-需求与规划/022-大需求怎么拆子任务.md) —— 根因 ③ 的"拆问题"指向这里
 - [#083 我配了 deny 规则，它照样删了我的东西](../09-工具可靠性/083-permissions和hooks拦不住.md) —— 第 6 步「hook 的三个正面用法」，把收尾检查从靠记性变成系统注入
 
-**参考资料**
+<details>
+<summary>参考资料</summary>
 
 - [CC Docs: best-practices](https://code.claude.com/docs/en/best-practices) —— 支撑 L1 硬触发与根因 ①：纠正超过两次就 `/clear`、"Correcting over and over"失败模式、"looks done"、"the loop closes on its own"（官方，2026-06）
-- [obra: systematic-debugging](https://github.com/obra/superpowers/blob/main/skills/systematic-debugging/SKILL.md) —— 支撑 L2 与根因 ③：Iron Law、≥3 次质疑架构、Red Flags、15-30 分钟 vs 2-3 小时与 95% / 40% 的对比（社区权威，2026；后一组数字未见独立复现）
+- [obra: systematic-debugging](https://github.com/obra/superpowers/blob/main/skills/systematic-debugging/SKILL.md) —— 支撑 L2 与根因 ③：Iron Law、≥3 次质疑架构、Red Flags（社区权威，核实于 2026-08-15）；15-30 分钟 vs 2-3 小时与 95% / 40% 的对比出自其旧版文档，作者已于 2026-07 删除，未见独立复现
 - [obra: verification-before-completion](https://github.com/obra/superpowers/blob/main/skills/verification-before-completion/SKILL.md) —— 支撑"看证据不看宣告"：Evidence before claims（社区权威，2026）
 - [Anthropic 4-23 postmortem](https://www.anthropic.com/engineering/april-23-postmortem) —— 支撑根因 ④ 与"越改越没方向感"：caching bug 导致失忆、effort 从 high 改 medium 的错误取舍（官方，2026-04）
 - [Medium @waleedk: Getting out of the cycle: fixloops](https://waleedk.medium.com/getting-out-of-the-cycle-fixloops-make-ai-codevelopment-more-productive-33d2e40e0e1f) —— 支撑"健康 vs 失控"一节：fixloop 的正面定义、三个缺失、L3 的 5 次迭代上限（社区方法论，Waleed Kadous，2025-12）
@@ -207,18 +212,21 @@ flowchart TD
 - [dev.to: AI killed my coding brain](https://dev.to/dev_tips/ai-killed-my-coding-brain-but-im-rebuilding-it-4i35) —— 支撑根因 ②④：AI 记不住过去 30 次调用的状态变化、"没搞懂过的东西没法调试"（社区，2025）
 - [HN 42829466 评论](https://news.ycombinator.com/item?id=42829466) —— 支撑"已经失控 → git reset"这一行：硬 reset 回这条链的第一个 commit（社区，只引评论）
 - [V2EX 1187820](https://v2ex.com/t/1187820) —— 支撑"每修一个新开一个对话"与"到点就换模型"两条社区共识（社区，2026-01）
-- [Cursor Forum 97598](https://forum.cursor.com/t/claude-sonnet-4-0-gets-stuck-in-loops/97598) —— 支撑折叠块"换工具不免疫"：Sonnet 4.0 无限反复跑测试套件却不修（社区，2025-05；站点反爬，仅 meta description 可抓）
+- [Cursor Forum 97598](https://forum.cursor.com/t/claude-sonnet-4-0-gets-stuck-in-loops/97598) —— 支撑折叠块"换工具不免疫"：Sonnet 4.0 反复跑测试套件却不修测试（社区，2025-05；站点反爬无法抓正文，标题与内容摘要经搜索快照核实于 2026-08-15）
+
+</details>
 
 [^1]: [CC Docs: best-practices](https://code.claude.com/docs/en/best-practices)（官方，2026-06）：在同一会话里就同一问题纠正 Claude 超过两次，上下文就已被失败的尝试塞乱，应运行 `/clear` 并用更具体的 prompt 重新开始。
 [^2]: [obra: systematic-debugging](https://github.com/obra/superpowers/blob/main/skills/systematic-debugging/SKILL.md)（社区权威，2026）：修复次数达到或超过 3 次就停下质疑架构，不经架构讨论不要尝试第 4 次修复。
 [^3]: [Anthropic 4-23 postmortem](https://www.anthropic.com/engineering/april-23-postmortem)（官方，2026-04）：caching bug 使 Claude 继续执行却越来越想不起来为何这么做；默认 reasoning effort 从 high 降到 medium 是错误的取舍。
-[^4]: [Medium @waleedk: fixloops](https://waleedk.medium.com/getting-out-of-the-cycle-fixloops-make-ai-codevelopment-more-productive-33d2e40e0e1f)（社区方法论，2025-12）：fixloop 指让 AI 自己判断有没有修好、没修好就再试；失控源于缺验证信号、缺迭代上限、缺人监督。
+[^4]: [Medium @waleedk: fixloops](https://waleedk.medium.com/getting-out-of-the-cycle-fixloops-make-ai-codevelopment-more-productive-33d2e40e0e1f)（社区方法论，2025-12）：fixloop 指让 AI 自己判断有没有修好、没修好就再试。原文给的护栏是迭代上限、成本监控、人工介入；"验证信号 / 迭代上限 / 人监督"这组三分法是本篇按其定义与护栏归纳的，原文未如此并列表述。
 [^5]: [obra: verification-before-completion](https://github.com/obra/superpowers/blob/main/skills/verification-before-completion/SKILL.md)（社区权威，2026）：没有新鲜的验证证据就不允许声称完成。
+[^6]: [Medium @waleedk: fixloops](https://waleedk.medium.com/getting-out-of-the-cycle-fixloops-make-ai-codevelopment-more-productive-33d2e40e0e1f)（社区方法论，2025-12）：原文建议"最多试 5 次，然后停下报告学到了什么"。5 次是社区建议值，未见官方确证。
 
 ---
 
 <sub>难度 高级 · 排错题 + 决策题 · 主线 Claude Code，横向 Cursor</sub>
 
-<sub>**时效**：本篇引用的模型与配置故事都是当时的快照 —— 4-23 postmortem（2026-04 发布）记录的 reasoning effort 从 high 降到 medium 发生在 2026-03-04；Cursor 论坛里 Sonnet 4.0 卡循环的报告是 2025-05。**已知不确定**：obra 给的"15-30 分钟 vs 2-3 小时、95% vs 40%"来自 skill 文档自述，未见独立复现，只当量级参考。**易变**：模型和默认配置随版本变化，上述案例只用来证明"配置退化会引发 fix loop"这个机制，不代表当前模型行为。决策框架（纠正 2 次就 clear、失败 3 次质疑架构、迭代 5 次设上限）与模型版本无关，长期有效。</sub>
+<sub>**时效**：核实日期 2026-08-15。本篇引用的模型与配置故事都是当时的快照 —— 4-23 postmortem（2026-04 发布）记录的 reasoning effort 从 high 降到 medium 发生在 2026-03-04；Cursor 论坛里 Sonnet 4.0 卡循环的报告是 2025-05。**已知不确定**：obra 的"15-30 分钟 vs 2-3 小时、95% vs 40%"出自 skill 文档旧版自述，作者已于 2026-07 将其删除，未见独立复现，只当量级参考；L3 的 5 次迭代上限是社区建议值，未见官方确证。**易变**：模型和默认配置随版本变化，上述案例只用来证明"配置退化会引发 fix loop"这个机制，不代表当前模型行为。决策框架（纠正 2 次就 clear、失败 3 次质疑架构、迭代 5 次设上限）与模型版本无关，长期有效。</sub>
 
 > 本篇个人实践（L4）：`[待补：BOSS 被 AI 的 fix loop 坑过吗？最惨的一次改了几轮、花了多久？你个人的「何时停」触发点是几次（2 次 /clear 还是 3 次质疑架构）？你用 /clear 重开多还是 git reset 回退多？systematic-debugging skill 你启用过吗、管用吗？两步调试法 prompt 你试过吗？]`

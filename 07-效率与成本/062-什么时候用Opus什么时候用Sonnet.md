@@ -29,7 +29,7 @@ flowchart TD
 
 三档路由，从默认往上升级。
 
-**第 1 步：把默认设成 Sonnet，不是 Opus。** 在 `/config` 里设默认模型，或用 `/model sonnet`（v2.1.153 及以后会把它存为新会话默认）。日常编码、能描述清楚的改动、上下文里已有代码的问答，全部走 Sonnet。官方原话是 Sonnet 能很好地处理大多数编码任务，且比 Opus 便宜[^1]。
+**第 1 步：把默认设成 Sonnet，不是 Opus。** 在 `/config` 里设默认模型，或用 `/model sonnet`（v2.1.153 及以后会把它存为新会话默认[^5]）。日常编码、能描述清楚的改动、上下文里已有代码的问答，全部走 Sonnet。官方原话是 Sonnet 能很好地处理大多数编码任务，且比 Opus 便宜[^1]。
 
 **怎么确认生效**：开一个新会话敲 `/model`，选择器顶部显示的当前模型是 Sonnet 而不是 Opus。
 
@@ -41,15 +41,9 @@ flowchart TD
 | 连续两轮给出方向性错误的方案，且满足下面三个信号中的两个 | 不够懂 | `/model opus` |
 | 你自己都说不清要什么，只能描述症状 | 不够懂 | 直接 `/model opusplan` |
 
-「很笃定」不可观测，换成三个能在回复里直接看到的信号，中两个就算：
+「很笃定」不可观测，换成三个能在回复里直接看到的信号，中两个就算：**回答里不出现犹豫措辞**（没有「可能」「大概」「建议你确认一下」）；**不主动提复查建议**（结尾没有「先跑测试验证」「需要的话我去读 X 文件」）；**收到需求后直接开始改文件**（不问澄清、不列方案，第一个动作就是 Edit/Write）。反过来，如果它自己在打问号、主动要你确认，多半是信息不足而不是模型不够强 —— 补上下文比换模型便宜。
 
-1. **回答里不出现犹豫措辞** —— 通篇没有「可能」「大概」「我不确定」「建议你确认一下」「取决于……」。
-2. **不主动提复查建议** —— 结尾没有「你可以先跑一下测试验证」「这块我没读到 X 文件，需要的话我去看」这类自我设限。
-3. **收到需求后直接开始改文件** —— 没有先问澄清问题、没有先列方案让你选，第一个动作就是 Edit/Write。
-
-反过来，如果它自己在打问号、主动要你确认，那多半是信息不足而不是模型不够强 —— 补上下文比换模型便宜。
-
-升 effort 比升模型便宜得多。反过来，简单任务把 effort 调低会提速、通常还降成本，且不影响输出质量[^2]。很多「以为只有 Opus 才做得对」的情况，其实只是 effort 不够。
+升 effort 比升模型便宜得多。反过来，日常任务降档（降 effort 或换小模型）会提速省钱，官方原话是「无质量代价」—— 但这个结论只针对足够常规的任务[^2]。很多「以为只有 Opus 才做得对」的情况，其实只是 effort 不够。
 
 **第 3 步：需求含糊的活用 `opusplan` 自动切。**
 
@@ -75,7 +69,7 @@ model: haiku          # 高 token、低智力 → 用最便宜的
 
 **第 5 步：agent teams 的队友用 Sonnet。** 官方建议队友用 Sonnet，它在协调类任务上兼顾能力和成本；同时 agent teams（plan mode 下的多智能体）大约消耗 7 倍 token，务必收敛队伍规模[^1]。开几个见 [#032 SubAgent 并行开几个](../04-执行工作流/032-SubAgent并行开几个.md)。
 
-**第 6 步：Fable 只留给真正的硬骨头。** 判断信号是：Opus 在高 effort 下连续两轮没有进展。适用场景是跨会话的大重构、线上故障排查、架构决策，用 `/model fable`。它单价约为 Sonnet 的 3.3 倍，不是日常选项。
+**第 6 步：Fable 只留给真正的硬骨头。** 判断信号是：Opus 在高 effort 下连续两轮没有进展。适用场景是跨会话的大重构、线上故障排查、架构决策，用 `/model fable`。它单价是 Sonnet 的 5 倍，不是日常选项。
 
 <details>
 <summary>/model 的全部可选项（alias 表）</summary>
@@ -84,7 +78,7 @@ model: haiku          # 高 token、低智力 → 用最便宜的
 |---|---|---|
 | `default` | 清除覆盖，回到账户推荐模型 | 想重置 |
 | `sonnet` | 最新 Sonnet（API 上 = Sonnet 5） | **日常编码默认** |
-| `opus` | 最新 Opus（= Opus 4.8） | 复杂推理 / 架构 |
+| `opus` | 最新 Opus（API 上 = Opus 5） | 复杂推理 / 架构 |
 | `haiku` | 快而省 | 简单任务、subagent 苦力 |
 | `fable` / `best` | Fable 5（有权限时） | 最难、跨会话的长任务 |
 | `sonnet[1m]` / `opus[1m]` | 1M 上下文窗口 | 超长会话（Sonnet 5 本身已是 1M） |
@@ -107,7 +101,7 @@ model: sonnet         # 需要真正理解 → 用 Sonnet，别 inherit 到 Opus
 ---
 ```
 
-内置的 `Explore` 子代理从 v2.1.198 起会继承主会话模型（API 上封顶到 Opus）。想强制它走便宜模型，可以自定义一个同样叫 `Explore` 的子代理，写上 `model: haiku` 来覆盖它。
+内置的 `Explore` 子代理从 v2.1.198 起会继承主会话模型（API 上封顶到 Opus）。想强制它走便宜模型，可以自定义一个同样叫 `Explore` 的子代理，写上 `model: haiku` 来覆盖它 —— 同名覆盖是官方文档明写的机制[^6]。
 
 **怎么确认生效**：派一次 subagent 后跑 `/usage`，用量归因里那个 subagent 对应的模型应该是 Haiku 而不是 Opus。
 
@@ -118,7 +112,7 @@ model: sonnet         # 需要真正理解 → 用 Sonnet，别 inherit 到 Opus
 
 除了换模型，你还有 effort。简单任务降 effort 省钱，难任务升 effort 补「不够努力」，两者都比换模型来得轻。
 
-extended thinking（扩展思考，指让模型在回答前多想一段）产生的思考 token 按 output 价计费，默认预算每个请求可达数万 token。简单任务可以用 `/effort` 降档，或在 `/config` 里关掉。thinking 的成本细节属于 [#061 怎么少烧 token](./061-怎么少烧token.md) 的范围。
+extended thinking（扩展思考，指让模型在回答前多想一段）产生的思考 token 按 output 价计费，默认预算随模型不同、每个请求可达数万 token[^7]。简单任务可以用 `/effort` 降档，或在 `/config` 里关掉。thinking 的成本细节属于 [#061 怎么少烧 token](./061-怎么少烧token.md) 的范围。
 
 </details>
 
@@ -134,27 +128,29 @@ extended thinking（扩展思考，指让模型在回答前多想一段）产生
 
 | 模型 | input $/1M | output $/1M | 上下文 | 相对 Sonnet |
 |---|---|---|---|---|
-| **Haiku 4.5** | $1 | $5 | 200K | ≈ 1/3 |
-| **Sonnet 5** | $3（引导期 $2，至 2026-08-31） | $15（引导期 $10） | 1M | 1x（基准） |
-| **Opus 4.8** | $5 | $25 | 1M | ≈ 1.67x |
-| **Fable 5** | $10 | $50 | 1M | ≈ 3.3x |
+| **Haiku 4.5** | $1 | $5 | 200K | 0.5x |
+| **Sonnet 5** | $2 | $10 | 1M | 1x（基准） |
+| **Opus 5 / 4.8** | $5 | $25 | 1M | 2.5x |
+| **Fable 5** | $10 | $50 | 1M | 5x |
 
-这张表要看两点。第一，Opus 只比 Sonnet 贵 1.67 倍，不是数量级差距 —— 所以「Opus 一定烧钱」和「Opus 无所谓」都不成立，差距要靠任务量放大才显著。第二，订阅制下你不直接按 token 付费，但仍然消耗用量额度（5 小时窗口、周额度），所以路由照样决定你多久撞一次限额，见 [#060 一天该烧多少额度](./060-一天该烧多少额度.md)。
+这张表要看三点。第一，Opus 比 Sonnet 贵 2.5 倍（Sonnet 5 上市时的引导价 $2/$10 已被官方定为标准价，原定 2026-09-01 涨回 $3/$15 的计划取消），不是数量级差距 —— 所以「Opus 一定烧钱」和「Opus 无所谓」都不成立，差距要靠任务量放大才显著。第二，订阅制下你不直接按 token 付费，但仍然消耗用量额度（5 小时窗口、周额度），所以路由照样决定你多久撞一次限额，见 [#060 一天该烧多少额度](./060-一天该烧多少额度.md)。
+
+第三，**这列倍率只在同代模型之间可比**。Claude 4.7 及之后的模型换了新分词器（把文本切成 token 的规则），同样一段文字会多切出约 30% token[^8]。表里 Sonnet 5、Opus 5、Fable 5 都用新分词器，彼此的倍率成立；Haiku 4.5 用的是旧分词器，同样的活切出的 token 更少，所以实际账单会比 0.5x 更低一些。拿 Haiku 和 Sonnet 比成本时，用两边各跑一次的实际账单，别拿单价直接乘。
 
 ### 贵模型 token 可能更省，所以判断标准是「缺什么」而不是「贵不贵」
 
-社区里有个常见观点：Opus 单价是 Sonnet 的 1.67 倍，但因为少走弯路、少来回改，完成同一任务的总 token 可能反而更少。这个权衡真实存在，但推不出「Opus 永远更划算」。
+社区里有个常见观点：Opus 单价是 Sonnet 的 2.5 倍，但因为少走弯路、少来回改，完成同一任务的总 token 可能反而更少。这个权衡真实存在，但推不出「Opus 永远更划算」。
 
 官方给的判断标准更精确：分清 Claude 是「缺知识」还是「没努力」[^2]。缺知识就升模型，没努力就升 effort。
 
-同一篇官方博客把三档模型拟人化，值得记住：Sonnet 是「很好的通才」，适合能被精确描述的编辑、机械改动、以及上下文里已有代码的问答；Opus 是「专家」，适合复杂、含糊、小模型容易自信答错的问题，它比 Sonnet 更会处理模糊需求；Fable 是最强的专家，适合微妙的 bug、陌生领域、架构决策，只有在其它模型真的被逼到极限时才动用。
+同一篇官方博客给三档模型的定位是：Sonnet 是「很好的通才」，接能被精确描述的活；Opus 是「专家」，接复杂、含糊、小模型容易自信答错的问题；Fable 是见过最难问题的专家，只在其它模型被逼到极限时动用[^2]。
 
 ## 别这么干
 
 - ❌ **把 Opus 设成常驻默认。** 官方点名的高账单两大根因之一（另一个是长会话不清理）。默认应该是 Sonnet。
 - ❌ **一遇到错就升到 Opus / Fable。** 先分清「不够懂」还是「不够努力」。跳过文件、没跑测试属于后者，升 effort 就够，比升模型便宜。
 - ❌ **subagent 不写 `model` 就跑苦力活。** 默认 `inherit`，主会话在 Opus 时连跑测试都在烧 Opus。高 token、低智力的子任务显式配 `model: haiku`。
-- ❌ **用 Fable 干日常活。** 单价约为 Sonnet 的 3.3 倍，官方定位是只有把其它模型逼到极限的硬骨头才用。
+- ❌ **用 Fable 干日常活。** 单价是 Sonnet 的 5 倍，官方定位是只有把其它模型逼到极限的硬骨头才用。
 - ❌ **在 agent teams 里给每个队友都上 Opus。** teams 本就约 7 倍 token，队友用 Sonnet、收敛规模、干完即关。
 
 <details>
@@ -181,22 +177,26 @@ extended thinking（扩展思考，指让模型在回答前多想一段）产生
 
 **参考资料**
 
-- [Manage costs effectively — Claude Code Docs](https://code.claude.com/docs/en/costs) —— 支撑本篇立论：「Sonnet 能处理大多数编码任务」「把 Opus 留给复杂架构决策或多步推理」「Opus 留作默认是高账单根因」「agent teams 约 7 倍 token」「subagent 用 haiku 控成本」（官方，2026-06）
-- [Model configuration — Claude Code Docs](https://code.claude.com/docs/en/model-config) —— 支撑第 3 步与 alias 折叠表：全部 model alias、`opusplan` 的 plan 用 Opus / 执行切 Sonnet、各 provider 的 alias 解析版本（官方，2026-06）
-- [Create custom subagents — Claude Code Docs](https://code.claude.com/docs/en/sub-agents) —— 支撑第 4 步：`model` frontmatter 取值与默认 `inherit`、Explore 的继承规则（官方，2026-06）
-- [Choosing a Claude model and effort level in Claude Code — Anthropic Blog](https://claude.com/blog/claude-model-and-effort-level-in-claude-code) —— 支撑第 2 步的诊断问题与三档模型定位：Sonnet 通才 / Opus 专家 / Fable 极限、「不够懂 vs 不够努力」、降 effort 提速降本（官方，2026）
-- [Anthropic 模型定价](https://claude.com/pricing) —— 支撑「为什么」第二节的单价表与倍率换算：Opus 4.8 $5/$25、Sonnet 5 $3/$15、Haiku 4.5 $1/$5、Fable 5 $10/$50（官方，2026-06）
+- [Manage costs effectively — Claude Code Docs](https://code.claude.com/docs/en/costs) —— 支撑本篇立论：「Sonnet 能处理大多数编码任务」「把 Opus 留给复杂架构决策或多步推理」「Opus 留作默认是高账单根因」「agent teams 约 7 倍 token」「subagent 用 haiku 控成本」、思考 token 计费（官方，核实于 2026-08-15）
+- [Model configuration — Claude Code Docs](https://code.claude.com/docs/en/model-config) —— 支撑第 1、3 步与 alias 折叠表：全部 model alias、`/model` 自 v2.1.153 起存为新会话默认、`opusplan` 的 plan 用 Opus / 执行切 Sonnet、各 provider 的 alias 解析版本（官方，核实于 2026-08-15）
+- [Create custom subagents — Claude Code Docs](https://code.claude.com/docs/en/sub-agents) —— 支撑第 4 步：`model` frontmatter 取值与默认 `inherit`、Explore 的继承规则与同名覆盖（官方，核实于 2026-08-15）
+- [Choosing a Claude model and effort level in Claude Code — Anthropic Blog](https://claude.com/blog/claude-model-and-effort-level-in-claude-code) —— 支撑第 2 步的诊断问题与三档模型定位：Sonnet 通才 / Opus 专家 / Fable 极限、「不够懂 vs 不够努力」、降 effort 提速降本（官方，核实于 2026-08-15）
+- [Anthropic 模型定价](https://platform.claude.com/docs/en/about-claude/pricing) —— 支撑「为什么」第二节的单价表与倍率换算：Opus 5 / 4.8 均为 $5/$25、Sonnet 5 $2/$10（引导价已转为标准价）、Haiku 4.5 $1/$5、Fable 5 $10/$50（官方，核实于 2026-08-15）
 - [Is Opus 4.6 really worth it compared to sonnet? — r/ClaudeCode](https://www.reddit.com/r/ClaudeCode/comments/1rc6xpu/is_opus_46_really_worth_it_compared_to_sonnet/) —— 支撑「贵模型 token 可能更省」这一社区观点的出处（社区，单源，仅标题级引用，未逐字核对正文）
 
-[^1]: [Manage costs effectively — Claude Code Docs](https://code.claude.com/docs/en/costs)（官方，2026-06）：账单意外飙高通常源于长会话从不清理，或 Opus 被留作默认模型；Sonnet 能很好地处理大多数编码任务且比 Opus 便宜；agent teams 大约用 7 倍 token。
-[^2]: [Choosing a Claude model and effort level in Claude Code — Anthropic Blog](https://claude.com/blog/claude-model-and-effort-level-in-claude-code)（官方，2026）：做错了要问它是不够努力还是不够懂；降低 effort 会提升速度、通常还降低成本，且不影响输出质量。
-[^3]: [Create custom subagents — Claude Code Docs](https://code.claude.com/docs/en/sub-agents)（官方，2026-06）：`model` 可取 sonnet/opus/haiku/fable/完整 ID/inherit，省略时默认 `inherit`，跟随主会话模型。
-[^4]: [Model configuration — Claude Code Docs](https://code.claude.com/docs/en/model-config)（官方，2026-06）：`opusplan` 在 plan mode 用 Opus，执行阶段切 Sonnet。
+[^1]: [Manage costs effectively — Claude Code Docs](https://code.claude.com/docs/en/costs)（官方，核实于 2026-08-15）：账单意外飙高通常源于长会话从不清理，或 Opus 被留作默认模型；Sonnet 能很好地处理大多数编码任务且比 Opus 便宜；agent teams 大约用 7 倍 token。
+[^2]: [Choosing a Claude model and effort level in Claude Code — Anthropic Blog](https://claude.com/blog/claude-model-and-effort-level-in-claude-code)（官方，核实于 2026-08-15）：做错了要问它是不够努力还是不够懂（did it not try hard enough, or did it not know enough）；日常任务用更低档的配置「省真金白银且无质量代价」（saves real money at no quality cost），该结论限定在常规任务。
+[^3]: [Create custom subagents — Claude Code Docs](https://code.claude.com/docs/en/sub-agents)（官方，核实于 2026-08-15）：`model` 可取 sonnet/opus/haiku/fable/完整 ID/inherit，省略时默认 `inherit`，跟随主会话模型。
+[^4]: [Model configuration — Claude Code Docs](https://code.claude.com/docs/en/model-config)（官方，核实于 2026-08-15）：`opusplan` 在 plan mode 用 Opus，执行阶段切 Sonnet。
+[^5]: [Model configuration — Claude Code Docs](https://code.claude.com/docs/en/model-config)（官方，核实于 2026-08-15）：原文明写 As of v2.1.153，`/model` 的选择会写入用户设置、成为新会话默认。
+[^6]: [Create custom subagents — Claude Code Docs](https://code.claude.com/docs/en/sub-agents)（官方，核实于 2026-08-15）：内置 Explore 从 v2.1.198 起继承主会话模型、在 Claude API 上封顶到 Opus；同名（Explore）的用户/项目级子代理会覆盖内置版本并保留自己的 `model` 字段。
+[^7]: [Manage costs effectively — Claude Code Docs](https://code.claude.com/docs/en/costs)（官方，核实于 2026-08-15）：思考 token 按 output token 计费，默认预算随模型不同、每个请求可达数万 token（tens of thousands of tokens per request depending on the model）。
+[^8]: [Pricing — Claude Platform Docs](https://platform.claude.com/docs/en/about-claude/pricing)（官方，2026-08-15 核实）原文：「Claude 4.7 and later models and Claude Mythos Preview use a newer tokenizer… This tokenizer produces approximately 30% more tokens for the same text. The exact increase depends on the content and workload shape. Claude Sonnet 4.6 and earlier models use the previous tokenizer.」同页确认 Fable 5 为 $10/$50、Opus 5 为 $5/$25、Sonnet 5 为 $2/$10、Haiku 4.5 为 $1/$5。
 
 ---
 
 <sub>难度 中级 · 决策题 + 配置题 · 主线 Claude Code，横向 Cursor / Copilot</sub>
 
-<sub>**时效**：模型单价（Haiku $1/$5、Sonnet $3/$15、Opus $5/$25、Fable $10/$50）与倍率换算已于 2026-07-18 对照 Anthropic 官方定价核实；`/model` alias 表与 subagent 继承规则同日对照官方文档核实。**已知不确定**：「Opus 单价更高但总 token 更省」出自单个社区讨论，只做标题级引用，未逐字核对正文，也没有可复现的实测数据；「连续两轮」这类切换门槛、以及第 2 步用来替代「答得很笃定」的三个可观测信号（无犹豫措辞 / 不提复查建议 / 直接动手改文件），都是本篇给的经验线，官方没有量化标准，2026-08-04 改写。**易变**：Sonnet 5 引导期折扣至 2026-08-31；alias 解析到的具体版本随 provider 和模型换代变化，换代或调价后倍率结论需重算。</sub>
+<sub>**时效**：模型单价（Haiku $1/$5、Sonnet $2/$10、Opus $5/$25、Fable $10/$50）与倍率换算已于 2026-08-15 对照 Anthropic 官方定价页核实 —— Sonnet 5 上市时的引导价 $2/$10（原定至 2026-08-31）已被官方定为标准价，原定 2026-09-01 涨回 $3/$15 的计划取消；`/model` alias 表（API 上 `opus` 已解析到 Opus 5）、v2.1.153 / v2.1.198 两处版本号断言、subagent 继承与同名覆盖规则、思考 token 计费同日对照官方文档核实。**已知不确定**：「Opus 单价更高但总 token 更省」出自单个社区讨论，只做标题级引用，未逐字核对正文（2026-08-15 尝试抓取原帖失败），也没有可复现的实测数据；「连续两轮」这类切换门槛、以及第 2 步用来替代「答得很笃定」的三个可观测信号（无犹豫措辞 / 不提复查建议 / 直接动手改文件），都是本篇给的经验线，官方没有量化标准。**易变**：alias 解析到的具体版本随 provider 和模型换代变化，换代或调价后倍率结论需重算。</sub>
 
 > 本篇个人实践（L4）：`[待补：BOSS 的实战经验/踩坑]`

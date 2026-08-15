@@ -10,7 +10,7 @@
 | 改一个功能你下了十几条指令 | 停手，改成给一句目标 | 让它先出计划，你审计划而不是审步骤 |
 | 它回「修好了」，但没贴任何命令输出 | 要求它贴测试输出再说 | 开口就附一个能跑出 pass/fail 的检查 |
 | 同一处已经纠正两次还没对 | `/clear`，把踩到的坑写进新 prompt | 别在被污染的会话里死磕 |
-| 一口气改了 8 个文件，你想按 `2` 全接 | 逐个展开 diff 读完再按 `1` | 长任务另起 subagent 做对抗式 review |
+| 一口气改了 8 个文件，你想按 `2` 后面全放行 | 逐个展开 diff 读完再按 `1` | 长任务另起 subagent 做对抗式 review |
 
 ```mermaid
 flowchart TD
@@ -27,8 +27,6 @@ flowchart TD
 
 ## 怎么做
 
-五个卡点，每个给「错法 → 正确姿势 → 怎么确认做对了」。
-
 ### 卡点 1：当聊天框用，不给项目上下文
 
 **错法**：敲一句「帮我写个登录功能」就等它吐代码。**可观测信号**：它反问你「用什么框架」「数据库在哪」，或者直接编了一套你项目里根本没有的写法。
@@ -36,20 +34,13 @@ flowchart TD
 **正确姿势**：每次开口带「文件指针 + 约束 + 参考实现」三件套。
 
 ```bash
-cd ~/my-api && claude
-
-# 错法：不给上下文，指望它凭空答
-> 帮我加个登录功能
-
-# 正确法：目标 + 上下文 + 参考 + 验证
+# 目标 + 上下文 + 参考 + 验证，缺一不可
 > 给 src/api/auth.ts 加 POST /login：校验邮箱密码，
   参考 src/api/users.ts 里 validateInput 的风格，密码用 bcrypt。
   改完跑 npm test src/api/auth.test.ts 必须全过。
 ```
 
-**怎么确认做对了**：它的第一个动作是去读你点名的那两个文件，而不是直接贴代码。
-
-顺带一条前提：必须在项目根目录启动。空目录或 home 目录启动，它读不到 `CLAUDE.md` 也读不到代码，等于让工程师在白纸上凭空写。
+**怎么确认做对了**：它的第一个动作是去读你点名的那两个文件，而不是直接贴代码。顺带一条前提：必须在项目根目录启动 —— 空目录或 home 目录启动，它读不到 `CLAUDE.md` 也读不到代码，等于让工程师在白纸上凭空写。
 
 ### 卡点 2：当打字员使唤，逐行指挥它怎么改
 
@@ -70,11 +61,10 @@ cd ~/my-api && claude
 
 **正确姿势**：开口就给一个能跑出 pass/fail 的东西（测试套件、build 退出码、linter、截图对比脚本），这个循环就能自己闭合[^2]。
 
-```text
-# 错法：没验证，它说"修好了"你就信
-> 修一下登录偶尔失败的 bug
+<details>
+<summary>完整 prompt 示例：先复现、再修、逐步贴输出</summary>
 
-# 正确法：先要一个能复现的失败测试，再修
+```text
 > 用户反映登录在 session 超时后会失败。
   1. 先在 src/auth/login.test.ts 写一个复现这个 bug 的失败测试
   2. 跑 npm test 确认测试是红的（证明 bug 存在）
@@ -83,18 +73,19 @@ cd ~/my-api && claude
   每一步都把命令输出贴给我看，别只说"成功了"。
 ```
 
+</details>
+
 **怎么确认做对了**：它的回复里能看到真实的测试输出文本（用例名、通过数、耗时），而不是一句「已通过」。落地成 TDD 节奏见 [#030 TDD 在 AI coding 里怎么做](../04-执行工作流/030-AI写的测试不可信.md)。
 
 ### 卡点 4：一条道走到黑，越纠正越乱
 
 **错法**：它改错了你说「不对，再改」，还是错，「再改」……**可观测信号**：同一个点你已经纠正两次仍未通过，或者它改了 A 又把 B 改回去、来回拉锯。
 
-**正确姿势**：官方红线是同一个问题在一个会话里纠正两次以上就 `/clear` 重开，用一个更具体、写进了新发现的 prompt 重来[^3]。
+**正确姿势**：官方红线是同一个问题在一个会话里纠正两次仍未通过就 `/clear` 重开，用一个更具体、写进了新发现的 prompt 重来[^3]。
 
 ```text
 > /clear
-
-# 重新组织一个更准的 prompt，把刚才踩的坑写进去：
+# 重开后用更准的 prompt，把刚才踩的坑写进去：
 > 注意：修改 payment.ts 时，
   金额校验必须同时满足 (1) 是正整数 (2) 不超过余额，
   两个条件缺一不可，之前那版改丢了第二条。
@@ -104,9 +95,12 @@ cd ~/my-api && claude
 
 ### 卡点 5：不读 diff，想按 `2` 全盘接受
 
-**错法**：它一口气改了 8 个文件，你没逐个展开就一路按 `1`，甚至动了按 `2`（本次会话所有改动全盘接受）的念头。
+**错法**：它一口气改了 8 个文件，你没逐个展开就一路按 `1`，甚至动了按 `2`（接受并且本会话后续改动不再逐条确认）的念头。
 
 **正确姿势**：每一行 diff 都当 code review 来读。跑偏就 `Esc` 打断、`/rewind` 回退、或直接说 "Undo that"。长任务另起一个干净上下文的 subagent 做对抗式 review —— 它不带「写这段代码时的偏见」[^1]。
+
+<details>
+<summary>subagent 对抗式 review 的 prompt 示例</summary>
 
 ```text
 > 用 subagent review 刚才对 src/api/auth.ts 的改动。
@@ -115,41 +109,33 @@ cd ~/my-api && claude
   有没有引入安全问题。报告问题，不要报告风格偏好。
 ```
 
+</details>
+
 **怎么确认做对了**：合并前你能逐个文件说出「这个文件改了什么、为什么」。说不出来的文件，就是你没读的文件。
 
 ## 为什么
 
-### 官方自己承认这条学习曲线
-
-Anthropic 的 best practices 开篇就说：Claude Code 是一个 agentic coding environment（智能体式编码环境），和「你问它答、然后等着」的聊天机器人不同，它能读文件、跑命令、改代码，在你旁观或走开时自主推进；但这份自主性带着一条学习曲线[^1]。
-
-白话说：你用 ChatGPT 练出来的肌肉记忆是「我提问 → 它回答 → 我执行」，Claude Code 期待的是「我给目标 → 它执行 → 我审查」。两套模式隔着一段适应期，套错了必然别扭。
+先看官方怎么定性：Claude Code 是一个 agentic coding environment（智能体式编码环境），能读文件、跑命令、改代码，在你旁观或走开时自主推进 —— 但这份自主性带着一条学习曲线[^1]。白话说：你用 ChatGPT 练出来的肌肉记忆是「我提问 → 它回答 → 我执行」，Claude Code 期待的是「我给目标 → 它执行 → 我审查」。两套模式隔着一段适应期，套错了必然别扭。五个卡点全是这条适应期上的坑，官方给其中最典型的几个起了名字。
 
 ### 最隐蔽的坑：trust-then-verify gap
 
-官方给「它交出一个看起来合理、却没处理边界情况的实现，你一信任就翻车」这件事起了名字，叫 trust-then-verify gap[^2]。机制是：Claude 会在「工作看起来做完了」的时候停下；如果没有一个能跑的检查，「看起来做完了」就是它唯一的信号，于是你成了那个验证环，每个错误都得等你自己发现。
-
-这正是卡点 3 要用 pass/fail 检查换掉「它说做完了」的原因 —— 你要的是终止条件，不是它的自我评价。
+官方给「它交出一个看起来合理、却没处理边界情况的实现，你一信任就翻车」这件事起了名字，叫 trust-then-verify gap[^2]。机制是：Claude 会在「工作看起来做完了」的时候停下；如果没有一个能跑的检查，「看起来做完了」就是它唯一的信号，于是你成了那个验证环，每个错误都得等你自己发现。这正是卡点 3 要用 pass/fail 检查换掉「它说做完了」的原因 —— 你要的是终止条件，不是它的自我评价。
 
 ### 纠正会污染上下文，而不是修正它
 
-官方把反复纠正命名为 Correcting over and over：你纠正一次，失败的做法就留在上下文里；纠正越多，模型手里的「错误示范」越多，越被带偏[^3]。相关的还有 kitchen sink session（大杂烩会话）—— 一个会话塞五件不相干的事，上下文全是噪音。
-
-所以「两次不过就 `/clear`」不是认输，是止损：一个干净会话加一个更精准的 prompt，几乎总能跑赢一个堆满失败尝试的旧会话。
+官方把反复纠正命名为 Correcting over and over：你纠正一次，失败的做法就留在上下文里；纠正越多，模型手里的「错误示范」越多，越被带偏[^3]。相关的还有 kitchen sink session（大杂烩会话）—— 一个会话塞五件不相干的事，上下文全是噪音。所以「两次不过就 `/clear`」不是认输，是止损：一个干净会话加一个更精准的 prompt，几乎总能跑赢一个堆满失败尝试的旧会话。
 
 ### 你会从代码作者变成代码观众
 
-安全工程师 Michael Taggart 用 Claude Code 做完一个项目后写道：按 `2`（接受本次会话所有改动）实在太诱人，而一旦你停止审视模型的输出，出事的概率就趋近于 1[^4]。他把自己那段状态形容成「辛普森一家里那只点头喝水的鸟」—— 读一段改动、按 `1`、再读一段、再按 `1`。
-
-更深的问题是：用 agent 写代码，你会从代码的作者变成代码的观众，只能事后倒推着去理解这段代码。理解成本更高，也更容易漏掉隐患。这条认知层的账怎么算，见 [#003](./003-AI代码审不动改不懂.md)。
+安全工程师 Michael Taggart 用 Claude Code 做完一个项目后写道：按 `2`（接受并且本会话后续不再逐条确认）实在太诱人，而一旦你停止审视模型的输出，出事的概率就趋近于 1[^4]。他把自己那段状态形容成「辛普森一家里那只点头喝水的鸟」—— 读一段改动、按 `1`、再读一段、再按 `1`。更深的问题是：用 agent 写代码，你会从代码的作者变成代码的观众，只能事后倒推着去理解这段代码。这条认知层的账怎么算，见 [#003](./003-AI代码审不动改不懂.md)。
 
 ## 别这么干
 
 - ❌ **把它当 ChatGPT 用。** 一问一答、不给项目上下文、等它吐完整代码自己粘贴 —— 完全没用上 agentic 能力，还嫌它「不如 ChatGPT 快」。
 - ❌ **当打字员使唤。** 逐行逐字下指令，浪费它的规划能力，把自己累成喝水鸟。
 - ❌ **不给验证方式就放它跑。** 它说「修好了」你就信，正好踩进 trust-then-verify gap。
-- ❌ **同一处纠正超过两次还在死磕。** 上下文已经被失败尝试塞满，越改越偏。官方红线是两次不过就 `/clear`。
-- ❌ **全盘接受 diff、想按 `2`。** 一旦停止审视，出事概率趋近 1。空目录启动同理 —— 没有上下文可审，也没有上下文可给。
+- ❌ **同一处纠正两次不过还在死磕。** 上下文已经被失败尝试塞满，越改越偏。官方红线是两次不过就 `/clear`。
+- ❌ **不读 diff、想按 `2` 后面全放行。** 一旦停止审视，出事概率趋近 1。空目录启动同理 —— 没有上下文可审，也没有上下文可给。
 
 <details>
 <summary>横向对比：同一个卡点，换 ChatGPT 或 Cursor 会怎样</summary>
@@ -179,21 +165,22 @@ Anthropic 的 best practices 开篇就说：Claude Code 是一个 agentic coding
 
 **参考资料**
 
-- [Claude Code Best practices — Anthropic](https://www.anthropic.com/engineering/claude-code-best-practices) —— 本篇 5 个卡点的主要官方依据：agentic coding environment 与学习曲线、trust-then-verify gap、kitchen sink session、两次纠正就 `/clear`、course-correct early and often、用干净上下文的 subagent 做对抗式 review（官方，2026-06 访问）
-- [Claude Code Docs: Overview](https://code.claude.com/docs/en/overview) —— 「agentic coding tool」定义与多入口架构，支撑「为什么」第一节（官方，2026-06 访问）
+- [Claude Code Best practices — Anthropic](https://code.claude.com/docs/en/best-practices) —— 本篇 5 个卡点的主要官方依据：agentic coding environment 与学习曲线、trust-then-verify gap、kitchen sink session、两次纠正就 `/clear`、Course-correct early and often、用干净上下文的 subagent 做对抗式 review；原 anthropic.com/engineering 链接已 308 跳转到此（官方，2026-08-15 逐字核对）
+- [Claude Code Docs: Overview](https://code.claude.com/docs/en/overview) —— 「agentic coding tool」定义与多入口架构，支撑「为什么」开头（官方，2026-06 访问）
 - [I used AI. It worked. I hated it. — Michael Taggart](https://taggart-tech.com/reckoning/) —— 卡点 5 与「作者变观众」的出处：按 `2` 太诱人、停止审视则出事概率趋近 1、喝水鸟状态（社区，2025）
-- [Claude Code Tips I Wish I Knew as a Beginner — r/ClaudeAI 1m1ihia](https://www.reddit.com/r/ClaudeAI/comments/1m1ihia/claude_code_tips_i_wish_i_knew_as_a_beginner/) —— 「差点放弃、觉得全是炒作」这条现象普遍存在的社区佐证（社区，2025）
-- [5 Mistakes I Made Using Claude Code That Cost Me Real Money — Medium](https://medium.com/@jaumegallegocusco/5-mistakes-i-made-using-claude-code-that-cost-me-real-money-55b8a8ee09bb) —— 「赔了钱不是因为工具差，是因为用错了」的佐证（社区，2025）
+- [Claude Code Tips I Wish I Knew as a Beginner — r/ClaudeAI 1m1ihia](https://www.reddit.com/r/ClaudeAI/comments/1m1ihia/claude_code_tips_i_wish_i_knew_as_a_beginner/) —— 「差点放弃、觉得全是炒作」这条现象普遍存在的社区佐证（社区，2025；本轮无法访问全文，见文末时效）
+- [5 Mistakes I Made Using Claude Code That Cost Me Real Money — Medium](https://medium.com/@jaumegallegocusco/5-mistakes-i-made-using-claude-code-that-cost-me-real-money-55b8a8ee09bb) —— 「赔了钱不是因为工具差，是因为用错了」的佐证（社区，2026-04，2026-08-15 复核全文）
+- [Claude Code Issue #17894](https://github.com/anthropics/claude-code/issues/17894) —— diff 确认界面选项 `2` 的实际文案「Yes, allow all edits during this session」及其向后生效语义的佐证（社区，2025）
 
-[^1]: [Claude Code Best practices — Anthropic](https://www.anthropic.com/engineering/claude-code-best-practices)（官方，2026-06 访问）：agentic coding environment 的定义与学习曲线；Explore first, then plan, then code；用干净上下文的 subagent 只看 diff 与验收标准挑错。
-[^2]: 同上，trust-then-verify gap：没有可跑的检查时，「看起来做完了」是 Claude 唯一的停止信号；给它一个能产出 pass 或 fail 的东西，循环就能自己闭合。
-[^3]: 同上，Correcting over and over：同一问题在一个会话里纠正两次以上就 `/clear`，用写进了新发现的更具体 prompt 重开。
+[^1]: [Claude Code Best practices — Anthropic](https://code.claude.com/docs/en/best-practices)（官方，2026-08-15 逐字核对）：agentic coding environment 的定义与学习曲线；Explore first, then plan, then code；用干净上下文的 subagent 只看 diff 与验收标准挑错。
+[^2]: 同上，trust-then-verify gap 为官方原文命名的失败模式：没有可跑的检查时，「看起来做完了」是 Claude 唯一的停止信号；给它一个能产出 pass 或 fail 的东西，循环就能自己闭合。
+[^3]: 同上，Correcting over and over 与 kitchen sink session 均为官方原文命名的失败模式；阈值官方原文为「After two failed corrections」（两次纠正失败即 `/clear`），用写进了新发现的更具体 prompt 重开。
 [^4]: [I used AI. It worked. I hated it. — Michael Taggart](https://taggart-tech.com/reckoning/)（社区，2025）：按 `2` 太诱人；一旦停止审视模型输出，出事概率趋近 1；用 agent 写代码会让你从代码作者变成代码观众。
 
 ---
 
 <sub>难度 基础 · 排错题 + 场景题 · 主线 Claude Code，横向 ChatGPT / Cursor</sub>
 
-<sub>**时效**：2026-07-18 复核。主干论据（agentic 定义、trust-then-verify gap、两次纠正就 `/clear`）是 Anthropic 官方 best-practices 的转述，不是社区传闻。**已知不确定**：Reddit 帖与 Medium 帖本轮只核到摘要级，未逐字复核全文；Taggart 一文已复核全文。**易变**：`/clear`、`/rewind`、`Esc` 打断等交互键随版本变化，以 `claude --help` 与官方 interactive-mode 文档为准；5 个卡点与处方不绑定版本。</sub>
+<sub>**时效**：2026-08-15 复核。主干论据已逐字对过官方 best-practices 原文：agentic coding environment 与学习曲线、trust-then-verify gap、kitchen sink session、Correcting over and over 均为官方原文用语；「两次纠正失败即 `/clear`」对应官方原文「After two failed corrections」。**已知不确定**：Reddit 帖本轮无法访问全文（仅核到摘要级），其「差点放弃、全是炒作」佐证未见逐字确证；Taggart 与 Medium 两文已复核全文。**易变**：`/clear`、`/rewind`、`Esc` 打断等交互键随版本变化，以 `claude --help` 与官方 interactive-mode 文档为准；diff 确认界面选项的编号与文案（如按 `2` 的具体措辞）随版本变化，发布前以当前版本实测为准；5 个卡点与处方不绑定版本。</sub>
 
 > 本篇个人实践（L4）：`[待补：BOSS 的实战经验/踩坑]`

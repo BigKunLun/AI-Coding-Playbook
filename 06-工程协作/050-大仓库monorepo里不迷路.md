@@ -30,37 +30,39 @@ flowchart TD
 
 这一步零配置、收益最大。从 `packages/api/` 启动时，Claude 加载 `packages/api/CLAUDE.md` 和根目录的 `CLAUDE.md`，`packages/web/` 的任何指令都不会进上下文[^1]；文件访问也天然被框在这个子树里，除非你再授权。
 
-机制上是两条不同的加载规则叠出来的效果，值得记住：**CLAUDE.md 沿目录树向上回溯，`settings.json` 不回溯。** 从 `packages/api/` 启动，往上一路到仓库根的 CLAUDE.md 都会加载，所以全仓通用约定不会丢；而 `.claude/settings.json` 只按固定的五层优先级叠加（企业管理 > 命令行 > 项目 local > 项目 > 用户），不会去父目录里找，也不会懒加载子目录的[^6]。
-
-这条不对称正是「从包目录启动」的硬理由：**它是唯一能同时拿到「祖先的 CLAUDE.md」和「本包 settings.json」的启动方式。** 反过来从仓库根启动，`packages/api/.claude/settings.json` 里那些包专属的 deny 规则、`additionalDirectories`、hook 全部读不到 —— 它既不在根目录的祖先链上，也不会被懒加载。
+机制上是两条加载规则叠出来的不对称：**CLAUDE.md 沿目录树向上回溯，`settings.json` 不回溯、只从启动目录加载**[^6]。所以从包目录启动是唯一能同时拿到「祖先的 CLAUDE.md」和「本包 settings.json」的启动方式；反过来从仓库根启动，`packages/api/.claude/settings.json` 里包专属的 deny 规则、`additionalDirectories`、hook 一条都读不到。
 
 **怎么确认生效**：会话里跑 `/context`，看 Memory files 那一栏。预期只列出本包和仓库根两份 CLAUDE.md，没有同级包的。包专属 settings 是否生效，用 `/permissions` 看 deny 列表里有没有你在本包配的规则。
 
-### 第 2 步：分层写 CLAUDE.md
+### 第 2 步：分层写 CLAUDE.md 和 skills
 
 根目录只放哪里都适用的内容：编码规范、commit 约定、仓库布局。每个包放自己那套：跑测试的命令、路由在哪、禁止写裸 SQL。这些文件提交进 git，各目录由 owner 维护自己那份。
 
-别指望用 `@import` 省上下文 —— `@` 引用只改善组织结构，被引用的文件启动时仍会全量加载（见 [#010](../02-上下文工程/010-CLAUDE-md怎么写才生效.md)）。要按需加载，用带 `paths` 的 rules 或下面的 per-directory skills。
+别指望用 `@import` 省上下文 —— `@` 引用只改善组织结构，被引用的文件启动时仍会全量加载（见 [#010](../02-上下文工程/010-CLAUDE-md怎么写才生效.md)）。要按需加载，用带 `paths` 的 rules 或 per-directory skills：包专属的操作流程（比如 API 包的测试套路）放进 `packages/api/.claude/skills/`，只在该包工作时才加载。skill 描述写短，把会触发它的关键词放在最前面（例如 "writing or modifying tests in `packages/api/`"），因为 skill 一多描述会被截断。
 
 ### 第 3 步：挡掉永远不该进上下文的东西
 
-**排除别的团队的包、遗留代码、拷进来的第三方子树：**
+两类东西两种挡法，配置写法见折叠块：
+
+- **别的团队的包、遗留代码、拷进来的第三方子树**：写进 `claudeMdExcludes`。它是静态排除，不是「今天聚焦这个包」的开关 —— 想临时聚焦，用第 1 步，别天天改这个列表。管理策略（组织统一下发的强制配置）级别的 CLAUDE.md 排除不掉。
+- **生成物和第三方代码**：`.gitignore` 里的目录（`node_modules/`、`dist/`）搜索时默认已跳过；已提交进仓库的生成代码、拷进来的第三方 SDK 用 `permissions.deny` 显式挡 Read。注意 deny 覆盖内建文件工具和 `cat`/`grep`/`find`，但不会从递归搜索的结果里过滤掉这些文件，也管不住 Claude 自己开的子进程去读[^7]。
+
+**怎么确认生效**：`/permissions` 的 deny 列表里能看到这几条规则；再让它读一个 `dist/` 下的文件，预期返回权限拒绝而不是文件内容。
+
+<details>
+<summary>两条排除规则的配置写法</summary>
 
 ```json
 // .claude/settings.local.json（个人用；手动创建的要自己加进 .gitignore）
 { "claudeMdExcludes": ["**/packages/admin-dashboard/**", "**/packages/legacy-*/**"] }
 ```
 
-它是静态排除，不是「今天聚焦这个包」的开关 —— 想临时聚焦，用第 1 步，别天天改这个列表。管理策略（组织统一下发的强制配置）级别的 CLAUDE.md 排除不掉。
-
-**挡掉生成物和第三方代码：** `.gitignore` 里的目录（`node_modules/`、`dist/`）搜索时默认已跳过；已提交进仓库的生成代码、拷进来的第三方 SDK 要显式 deny。
-
 ```json
 // .claude/settings.json（提交，全仓生效）
 { "permissions": { "deny": ["Read(./**/dist/**)", "Read(./**/build/**)", "Read(./**/*.generated.*)", "Read(./vendor/**)"] } }
 ```
 
-注意 deny 覆盖内建文件工具和 `cat`/`grep`/`find`，但不会从递归搜索的结果里过滤掉这些文件，也管不住 Claude 自己开的子进程去读。
+</details>
 
 ### 第 4 步：让它别靠全文扫描找符号
 
@@ -70,7 +72,7 @@ flowchart TD
 /plugin install typescript-lsp@claude-plugins-official
 ```
 
-包专属的操作流程（比如 API 包的测试套路）放进 `packages/api/.claude/skills/`，只在该包工作时才加载。skill 描述写短，把会触发它的关键词放在最前面（例如 "writing or modifying tests in `packages/api/`"），因为 skill 一多描述会被截断。
+**怎么确认生效**：`/plugin` 列表里能看到已装插件；问一句「某某符号在哪定义」，预期它调用插件的跳定义能力直接给出文件和行号，而不是逐个 Read 文件去找。
 
 ### 第 5 步：跨包改动，一个会话做完
 
@@ -86,14 +88,19 @@ flowchart TD
 
 四条纪律各自对应一个失败模式：
 
-- **一个会话改完**：把共享改动和它的调用方一起交出去，每处改动背后的决策才一致；分包做会重新推导，决策就飘了[^2]。
+- **一个会话改完**：共享改动和它的调用方一起交出去，决策才一致；分包做会重新推导，决策就飘了[^2]。
 - **计划先落盘**：长的跨包会话会一路 compact 掉上下文，写进文件的计划活得比对话历史久[^3]。
-- **给一条 build 命令当终止条件**：prompt 里点名受影响的包，再给 `pnpm turbo build` 这样一条命令，Claude 才有明确的成功/失败信号，能自己闭环。
-- **受影响的包一次提交**：拆成多个 commit 会留下「改了共享类型、调用方还没跟上」的中间态，这个中间态的 build 是坏的[^4]。commit 和 PR 的 git 侧展开见 [#052](./052-别让AI搞乱git仓库.md)。
+- **给一条 build 命令当终止条件**：有明确的成功/失败信号，Claude 才能自己闭环。
+- **受影响的包一次提交**：多个 commit 会留下 build 坏掉的中间态[^4]。git 侧展开见 [#052](./052-别让AI搞乱git仓库.md)。
 
 ### 第 6 步：跨包访问怎么给权限
 
-从 `packages/api/` 启动却要改 `shared/` 时，两条路，区别在于会不会连带加载那个目录的 CLAUDE.md 和 skills：
+从 `packages/api/` 启动却要改 `shared/` 时，两条路：临时用 `--add-dir` 标志，固定给本包所有人用 `additionalDirectories` 设置。区别在于会不会连带加载那个目录的 CLAUDE.md 和 skills，配置写法和差异表见折叠块。
+
+**别误会一点**：官方明说，不管用哪种方式加目录，Claude 都能读也能改里面的文件[^5]。`--add-dir` 给的是读写权，不是只读，挡不住对同级包的写入。
+
+<details>
+<summary>两种加法的配置与加载差异</summary>
 
 | 加法 | 加载 CLAUDE.md / rules | 加载 skills |
 |---|---|---|
@@ -110,7 +117,7 @@ CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1 claude --add-dir ../shared   # �
 { "permissions": { "additionalDirectories": ["../shared", "../web"] } }
 ```
 
-**别误会一点**：官方明说，不管用哪种方式加目录，Claude 都能读也能改里面的文件[^5]。`--add-dir` 给的是读写权，不是只读，挡不住对同级包的写入。
+</details>
 
 <details>
 <summary>用 worktree 时只签出需要的目录</summary>
@@ -131,11 +138,7 @@ CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1 claude --add-dir ../shared   # �
 
 ### 1. 为小项目调好的默认设置，到大仓里会把上下文喂脏
 
-官方 large-codebases 文档开门见山点破根因：仓库变大后，为小项目调好的默认设置会把上下文窗口塞满与任务无关的指令和文件读取，既烧 token 又拉低表现[^1]。
-
-举例：一个 20 个包的 monorepo，你说「读一下代码库」，Claude 会把 15 个不相关包的约定和文件全塞进去。社区的说法更直白 —— 把全部 15 个包灌进上下文只会增加噪音，不会改善输出质量[^4]。
-
-这和 [#012](../02-上下文工程/012-上下文窗口要爆了.md) 讲的窗口爆炸是同一类病。但 monorepo 多给了一个通用仓没有的解法：用目录结构做切片。
+官方 large-codebases 文档开门见山点破根因：仓库变大后，为小项目调好的默认设置会把上下文窗口塞满与任务无关的指令和文件读取，既烧 token 又拉低表现[^1]。举例：20 个包的仓库、本次任务只涉及 5 个，你说「读一下代码库」，它会把其余 15 个不相关包的约定和文件全灌进上下文 —— 只增加噪音，不改善输出质量[^4]。这和 [#012](../02-上下文工程/012-上下文窗口要爆了.md) 讲的窗口爆炸是同一类病，但 monorepo 多给了一个通用仓没有的解法：用目录结构做切片。
 
 ### 2. 从哪里启动，决定了 Claude 看得见什么
 
@@ -148,11 +151,7 @@ CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1 claude --add-dir ../shared   # �
 
 ### 3. 跨包改动为什么会裂开
 
-社区把跨包改动列为 monorepo 开发里风险最高的一类操作[^4]，裂开有两种情况。
-
-一是改一半丢了上下文：改共享类型时会话往往很长，中途 compact（把旧对话压缩掉腾空间）之后，它可能忘了还有几个调用方没改。二是 build 出现破窗：改动拆成多个 commit 就会留下「改了共享类型、调用方还没跟上」的中间态，这个中间态编译不过。
-
-官方对这个问题给的是流程约束而不是配置项，就是上面第 5 步那四条。
+社区把跨包改动列为 monorepo 开发里风险最高的一类操作[^4]，裂开有两种情况。一是改一半丢了上下文：跨包会话往往很长，中途 compact（把旧对话压缩掉腾空间）之后，它可能忘了还有几个调用方没改。二是 build 出现破窗：改动拆成多个 commit 就会留下「改了共享类型、调用方还没跟上」的中间态，这个中间态编译不过。官方对这个问题给的是流程约束而不是配置项，就是上面第 5 步那四条。
 
 ## 别这么干
 
@@ -189,7 +188,7 @@ CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1 claude --add-dir ../shared   # �
 - [Set up Claude Code in a monorepo or large codebase — Claude Code Docs](https://code.claude.com/docs/en/large-codebases) —— 本篇权威源：per-dir CLAUDE.md、`claudeMdExcludes`、`Read` deny、`sparsePaths`、per-dir skills、`--add-dir` 加载差异表、跨包两条法则全部出自此（官方，2026-07）
 - [Claude Code with Monorepos — Phos AI Labs](https://phosailabs.com/blog/claude-code-monorepos) —— 支撑「跨包改动是最高风险类」「多 commit 造成 build 破窗」「原子提交」三处论断（社区，2026-04）
 - [Claude Code for Monorepo Development — lowcode.agency](https://www.lowcode.agency/blog/claude-code-monorepo) —— 支撑「从包目录启动做上下文切片」在实践中被反复验证（社区，2026，与官方文档说法一致但为二手复述）
-- 《多仓库 CLAUDE.md 配置方案》（内部项目笔记）—— 支撑「CLAUDE.md 向上回溯、settings.json 不回溯」这条不对称，及由此得出的启动位置结论（个人研究，2026-07）
+- 《多仓库 CLAUDE.md 配置方案》（内部项目笔记）—— 最早推出「CLAUDE.md 向上回溯、settings.json 不回溯」这条不对称及启动位置结论（个人研究，2026-07；2026-08-15 起该不对称已由官方 large-codebases 文档正面写明，见 [^6]）
 - [Claude Code settings — Claude Code Docs](https://code.claude.com/docs/en/settings) —— settings 五层优先级叠加，无父目录回溯（官方）
 - [How I Organized My CLAUDE.md in a Monorepo — dev.to/anvodev](https://dev.to/anvodev/how-i-organized-my-claudemd-in-a-monorepo-with-too-many-contexts-37k7) —— 支撑「根 CLAUDE.md 会膨胀」与「`@` 引用不省 token」两处论断（社区，单人经验）
 
@@ -198,12 +197,13 @@ CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1 claude --add-dir ../shared   # �
 [^3]: 同上：长的跨包会话会一路压缩上下文，落盘的计划能活过对话历史。
 [^4]: [Claude Code with Monorepos — Phos AI Labs](https://phosailabs.com/blog/claude-code-monorepos)（社区，2026-04）：跨包改动是 monorepo 开发里风险最高的一类；拆成多个 commit 会制造 build 损坏的窗口。
 [^5]: [Claude Code Docs: large-codebases](https://code.claude.com/docs/en/large-codebases)（官方，2026-07）：不论用哪种方式添加目录，Claude 都能读取和编辑其中的文件。
-[^6]: [Claude Code Docs: memory](https://code.claude.com/docs/en/memory)（官方）：CLAUDE.md 从 cwd 向上递归查找到根目录，沿途每份都加载；子目录的只在读到该目录文件时才加载。[Claude Code Docs: settings](https://code.claude.com/docs/en/settings)（官方）只定义了固定的五层优先级叠加，未定义任何沿父目录回溯的行为 ——「所以从包目录启动才能精准拿到该包配置」这一推论出自个人研究笔记《多仓库 CLAUDE.md 配置方案》（内部项目笔记）（个人研究，2026-07-01）。
+[^6]: [Claude Code Docs: memory](https://code.claude.com/docs/en/memory)（官方）：CLAUDE.md 从 cwd 向上递归查找到根目录，沿途每份都加载；子目录的只在读到该目录文件时才加载。settings 不回溯已由官方正面写明：[large-codebases](https://code.claude.com/docs/en/large-codebases)（官方，2026-08-15 复核）称 `.claude/settings.json` 只从启动目录加载、不像 CLAUDE.md 那样从父目录继承。注意一个例外：自 v2.1.211 起，仓库根的 `.claude/settings.local.json` 在仓库内任意目录启动都会加载。
+[^7]: [Claude Code Docs: large-codebases](https://code.claude.com/docs/en/large-codebases)（官方，2026-08-15 核实）：deny 规则覆盖内建文件工具及 `cat`/`head`/`grep`/`find` 等被识别的 Bash 文件命令（当被拒路径作为参数传入时），但不会从递归搜索的输出里过滤这些路径，也不覆盖自行打开文件的任意子进程。
 
 ---
 
 <sub>难度 中级 · 配置题 · 主线 Claude Code，横向 Cursor / Copilot</sub>
 
-<sub>**时效**：全部配置键（`claudeMdExcludes`、`permissions.deny` 的 Read 规则、`worktree.sparsePaths` / `symlinkDirectories`、`additionalDirectories` / `--add-dir` 及其加载差异表）已于 2026-07-18 对照官方 large-codebases 文档逐项核实；CLAUDE.md 向上回溯与 settings 五层优先级于 2026-08-04 复核。**已知不确定**：「20 个包 / 15 个无关包」是举例说明用的数量级，不是实测统计；「settings.json 不向上回溯」是从官方 settings 文档只定义五层优先级、未定义回溯行为推出的，官方没有正面的否定表述。**易变**：LSP 插件的安装命令与插件名、`worktree.*` 配置键随版本迭代快，动手前回查官方文档。</sub>
+<sub>**时效**：全部配置键与行为断言（`claudeMdExcludes` 及「管理策略级 CLAUDE.md 排除不掉」、`permissions.deny` 的 Read 规则及其覆盖范围（内建工具 + `cat`/`grep`/`find`、不过滤搜索结果、不管子进程）、`worktree.sparsePaths` / `symlinkDirectories` 及「路径相对仓库根、`.claude` 须显式列入」、`additionalDirectories` / `--add-dir` 加载差异表与 `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD` 环境变量、启动位置对照表、`/plugin install typescript-lsp@claude-plugins-official` 命令）已于 2026-08-15 对照官方 large-codebases 文档逐项核实。「settings.json 不从父目录继承」原为推论，2026-08-15 起官方 large-codebases 文档已正面写明（见 [^6]，含 settings.local.json 自 v2.1.211 起的例外）。**已知不确定**：「20 个包 / 只涉及 5 个 / 15 个无关包」是举例说明用的数量级，不是实测统计。**易变**：LSP 插件的安装命令与插件名、`worktree.*` 配置键随版本迭代快，动手前回查官方文档。</sub>
 
 > 本篇个人实践（L4）：`[待补：BOSS 的实战经验/踩坑]`

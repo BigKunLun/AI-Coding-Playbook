@@ -32,7 +32,7 @@ flowchart TD
 
 按顺序看三样：
 
-1. **token 计数在涨吗？** 状态行显示类似 `↓ 35.0k tokens · thinking`。数字在动 = 长思考，继续等；数字停住超过 60 秒 = 真卡。
+1. **token 计数在涨吗？** 状态行显示类似 `↓ 35.0k tokens · thinking`。数字在动 = 长思考，继续等；数字停住超过 60 秒 = 真卡。60 秒是经验阈值，官方无此标准，取的是排除长思考的安全余量。
 2. **有没有报错文字？** 有 `Stream idle timeout` / `529` / `exceeded ... token maximum` 就直接跳到对应小节，别走通用流程。
 3. **最后一个动作是什么？** 状态行停在某条 Bash 命令上 = 本地命令卡住，跟 API 无关。
 
@@ -56,15 +56,7 @@ claude --resume
 
 ### 第 2 步：resume 之后先对账，别接着往下改
 
-这是「长文件改到一半断了」的关键动作。断点之后你不知道文件处于什么状态，直接让它继续改会叠加出更烂的结果。先在终端跑 `git status` / `git diff` / `git stash list`，然后在会话里给一句明确指令：
-
-```
-先不要写任何代码。跑 git diff，逐个文件告诉我：
-1) 哪些改动已经落盘且是完整的
-2) 哪些文件改了一半（比如函数没闭合、import 没补）
-3) 你原计划要改但还没动的
-列完等我确认再继续。
-```
+这是「长文件改到一半断了」的关键动作。断点之后你不知道文件处于什么状态，直接让它继续改会叠加出更烂的结果。先在终端跑 `git status` / `git diff` / `git stash list`，然后在会话里贴本节末尾折叠块里那段断点对账提示词——核心要求是：先不写任何代码，跑 `git diff` 报出「已完成 / 改了一半 / 未开始」三分清单，等你确认再继续。
 
 **怎么确认做到位**：它给出的「已完成 / 半截 / 未开始」三分清单，和你 `git diff` 看到的逐条一致。有一条对不上就说明它在猜，让它逐文件重读。
 
@@ -72,12 +64,7 @@ claude --resume
 
 ### 第 3 步：`Stream idle timeout` —— 调超时 + 查网络
 
-先把超时放宽，写进 settings.json 而不是临时 export，这样重启终端也在：
-
-```jsonc
-// ~/.claude/settings.json（对你所有项目生效）
-{ "env": { "API_TIMEOUT_MS": "1200000" } }
-```
+先把超时放宽：在 `~/.claude/settings.json` 的 `env` 块里把 `API_TIMEOUT_MS` 调大（如 `1200000`），写进 settings.json 而不是临时 export，这样重启终端也在。完整可抄配置见本节末尾折叠块。
 
 **怎么确认做到位**：改完重启 Claude Code，跑 `/doctor`，确认设置被读到、没有 JSON 语法报错。
 
@@ -89,17 +76,16 @@ claude --resume
 
 **怎么确认做到位**：换模型后同一个请求能正常出结果 = 确实是容量问题，不是你的配置。
 
-CI 或无人值守场景可以让它对 429/529 无限重试：`{"env": {"CLAUDE_CODE_RETRY_WATCHDOG": "1"}}`。交互式使用别开——你会对着一个永远在重试的界面干等。相关的还有 `CLAUDE_CODE_MAX_RETRIES`（默认 10，上限 15；开了 watchdog 后上限被移除）。
+CI 或无人值守场景可以让它对 429/529 无限重试：`{"env": {"CLAUDE_CODE_RETRY_WATCHDOG": "1"}}`。交互式使用别开——你会对着一个永远在重试的界面干等。相关的还有 `CLAUDE_CODE_MAX_RETRIES`（默认 10，上限 15；开了 watchdog 后上限被移除）[^5]。
 
 ### 第 5 步：卡在某条 bash 命令 —— 放宽超时**并**改命令
 
-两件事都要做。放宽超时：
+两件事都要做。放宽超时：settings.json 的 `env` 块里调大 `BASH_DEFAULT_TIMEOUT_MS` / `BASH_MAX_TIMEOUT_MS`（完整可抄配置见本节末尾折叠块）。
 
-```jsonc
-{ "env": { "BASH_DEFAULT_TIMEOUT_MS": "300000", "BASH_MAX_TIMEOUT_MS": "900000" } }
-```
+改命令本身更重要——超时调多大都救不了一个永不返回的命令。在 CLAUDE.md 里写死搜索、分页、长命令三条约束，比每次口头提醒有效，示例见折叠块。
 
-改命令本身更重要——超时调多大都救不了一个永不返回的命令。在 CLAUDE.md 里写死约束，比每次口头提醒有效：
+<details>
+<summary>可以直接抄的 CLAUDE.md 命令约束</summary>
 
 ```markdown
 ## 命令执行约束
@@ -107,6 +93,8 @@ CI 或无人值守场景可以让它对 429/529 无限重试：`{"env": {"CLAUDE
 - git 命令带 --no-pager，禁止进入交互式分页器
 - 任何可能超过 2 分钟的命令（构建、全量测试），先告诉我，由我在外部终端跑
 ```
+
+</details>
 
 **怎么确认做到位**：下次它跑搜索时命令是 `rg 'xxx' src/` 这种带目录限定的形式，而不是从仓库根开始扫。
 
@@ -116,17 +104,22 @@ CI 或无人值守场景可以让它对 429/529 无限重试：`{"env": {"CLAUDE
 
 **怎么确认做到位**：同样的任务不再中途报这个错。调大后还是撞，说明拆分没做够，回到第一动作。
 
-### 第 7 步：怀疑是自己的配置搞出来的
+### 第 7 步：排查完还想预防（低频路径，全部在折叠块里）
 
-用 `claude --safe-mode` 起一次，它关掉本次会话的所有自定义项。配套两个检查：`/doctor` 查安装、设置、扩展、上下文占用；`/mcp` 看各 MCP server 连接状态。`claude` 根本起不来时，在终端里跑不带斜杠的 `claude doctor`。
+<details>
+<summary>怀疑是自己的配置搞出来的 + 结构性预防</summary>
 
-**怎么确认做到位**：你能说出「开着 X 就卡，关掉 X 就不卡」这样的对照结论，而不是「关了一堆好像好点了」。
+**怀疑是自己的配置搞出来的**：用 `claude --safe-mode` 起一次，它关掉本次会话的所有自定义项。配套两个检查：`/doctor` 查安装、设置、扩展、上下文占用；`/mcp` 看各 MCP server 连接状态。`claude` 根本起不来时，在终端里跑不带斜杠的 `claude doctor`。
 
-### 第 8 步：结构性预防（做完上面才做这个）
+怎么确认做到位：你能说出「开着 X 就卡，关掉 X 就不卡」这样的对照结论，而不是「关了一堆好像好点了」。
+
+**结构性预防（做完上面才做这个）**：
 
 - **上下文别撑满**。上下文压到极限时更容易长时间无响应和 auto-compact 反复。官方对 `Autocompact is thrashing` 的处置：让它按行范围分块读大文件、用带焦点的 `/compact`（如 `/compact keep only the plan and the diff`）、把大文件的活丢给 subagent 隔离、或者直接 `/clear`。
 - **大任务先出计划再执行**，每步之间有落盘和确认点，任何一步断了损失只有一步。
 - **随手 commit**。断点恢复的成本和你上次 commit 的距离成正比。
+
+</details>
 
 <details>
 <summary>可以直接抄的 settings.json，和一段断点恢复提示词</summary>
@@ -174,11 +167,16 @@ CI 或无人值守场景可以让它对 429/529 无限重试：`{"env": {"CLAUDE
 
 ### 阈值和重试规则都是官方写死的
 
-流中断超过 20 秒会弹出等待横幅（advisor 调用是 90 秒），整个请求的超时由 `API_TIMEOUT_MS` 控制，默认 600000 毫秒（10 分钟）；官方给的判断标准很直接：这个横幅**每次尝试都出现**就按网络问题处理，而不是继续等[^2]。
+流中断超过 20 秒会弹出等待横幅；正在跑 advisor 调用时放宽到 90 秒——advisor 指 Claude Code 内部咨询另一个更强模型的辅助请求，不是你的主请求。整个请求的超时由 `API_TIMEOUT_MS` 控制，默认 600000 毫秒（10 分钟）；官方给的判断标准很直接：这个横幅**每次尝试都出现**就按网络问题处理，而不是继续等[^2]。
+
+<details>
+<summary>重试规则与 bash 超时默认值明细</summary>
 
 同页还写明哪些会自动重试：服务端错误、529、超时、响应开始前的连接中断会重试；TLS 证书失败、响应中途（某个 block 已完成后）的服务端错误不会重试。这解释了为什么有的错误自己就恢复了，有的直接把整轮丢掉。
 
 bash 那边：`BASH_DEFAULT_TIMEOUT_MS` 默认 120000 毫秒（2 分钟），`BASH_MAX_TIMEOUT_MS` 默认 600000 毫秒[^4]。你让它跑一个需要 5 分钟的构建，默认配置下 2 分钟就被掐掉，看起来像「Claude Code 卡住了又自己乱跳」。反过来，某些环境下（Windows 尤其常见）`find`、`ls`、`grep` 会因为扫到挂载点、网络盘、巨大目录而永不返回——这时卡住的是你的操作系统，Claude Code 只是在老实等。
+
+</details>
 
 ## 别这么干
 
@@ -189,13 +187,13 @@ bash 那边：`BASH_DEFAULT_TIMEOUT_MS` 默认 120000 毫秒（2 分钟），`BA
 - ❌ **看到社区 issue 说「降级到 X 版本」就照做** —— 降级会丢掉这期间所有修复和安全更新，还可能撞上早就修好的老 bug。只在你能自己复现「换版本症状就变」时才用，并尽快升回来。
 
 <details>
-<summary>版本相关的具体 workaround（时效性最强，2026-08-03 状态，随版本更新即失效）</summary>
+<summary>版本相关的具体 workaround（时效性最强，2026-08-15 状态，随版本更新即失效）</summary>
 
 上面的分诊流程无论版本怎么变都成立，这一节只是补充。看之前先确认你的版本和下面对不上。
 
 - **`Stream idle timeout` 在 2.1.92 附近有一波集中报告**。[GH #46987](https://github.com/anthropics/claude-code/issues/46987) 报告者称 2.1.90 正常、2.1.92 开始复现，issue 被打了 `duplicate` 标签，说明是已知问题的一个实例。当时社区做法是降级回上一个可用版本，**现在不建议无脑照抄**——只在你能明确复现「换版本就好 / 就坏」时才用。
 - **「tool call could not be parsed（retry also failed）」**：[GH #63875](https://github.com/anthropics/claude-code/issues/63875)（2.1.158）和 [GH #62123](https://github.com/anthropics/claude-code/issues/62123)（2.1.150）都是这个，标记为 `area:model`，即模型侧问题。现象是工具调用直接被丢弃、内置重试也失败。没有官方 workaround，社区做法是手动重发、把大 payload 拆小、避免往参数里塞超长代码块。这类不需要改任何配置。
-- **v2.1.208 之前**，会话里如果有超大 Markdown 表格，resume 时会因为重新渲染每一行而卡住。新版本已改成只渲染前 200 行。卡在 resume 那一刻就先升级版本。
+- **v2.1.208 之前**，会话里如果有超大 Markdown 表格，resume 时会因为重新渲染每一行而卡住。[v2.1.208 release notes](https://github.com/anthropics/claude-code/releases/tag/v2.1.208) 记录了这个修复：超过 200 行的表格只渲染前 200 行，其余显示「… N more rows」。卡在 resume 那一刻就先升级版本。
 - **输出上限报错和「还在跑」会同时发生**：[GH #24055](https://github.com/anthropics/claude-code/issues/24055)（带 `has repro` / `oncall` 标签）记录了任务跑 8 分钟后弹出 `exceeded the 32000 output token maximum`、但会话看起来还在继续跑的组合。这类根因是单轮要产出的东西太多，调大上限只是让它撞墙晚一点。
 
 判断这一节还有没有效：去对应 issue 页面看是否已关闭，并跑一次 `claude doctor` 看当前版本。
@@ -214,7 +212,8 @@ bash 那边：`BASH_DEFAULT_TIMEOUT_MS` 默认 120000 毫秒（2 分钟），`BA
 **参考资料**
 
 - [Troubleshooting — Claude Code Docs](https://code.claude.com/docs/en/troubleshooting) —— 支撑「hang 处置流程、resume 不丢对话、`--safe-mode`、`/doctor`、ripgrep、auto-compact thrashing」（官方，核实于 2026-08）
-- [Error reference — Claude Code Docs](https://code.claude.com/docs/en/errors) —— 支撑「20 秒 / 90 秒横幅阈值、`API_TIMEOUT_MS` 默认值、529 处置、重试规则、retry watchdog」（官方，核实于 2026-08）
+- [Error reference — Claude Code Docs](https://code.claude.com/docs/en/errors) —— 支撑「20 秒 / 90 秒横幅阈值、`API_TIMEOUT_MS` 默认值、529 处置、重试规则、retry watchdog 与 `CLAUDE_CODE_MAX_RETRIES` 默认值/上限」（官方，核实于 2026-08-15）
+- [Release v2.1.208 — anthropics/claude-code](https://github.com/anthropics/claude-code/releases/tag/v2.1.208) —— 支撑「超大 Markdown 表格 resume 卡住的修复与前 200 行渲染上限」（官方 release notes，2026-07，核实于 2026-08-15）
 - [Environment variables — Claude Code Docs](https://code.claude.com/docs/en/env-vars) —— 支撑 bash 超时默认值与 settings.json 三级作用域优先级（官方，核实于 2026-08）
 - [GH #26224](https://github.com/anthropics/claude-code/issues/26224) —— 支撑「卡 5–20 分钟且 token 不增长是服务端 SSE 问题」（社区 + 官方置顶回复，2026-02）
 - [GH #46987](https://github.com/anthropics/claude-code/issues/46987) —— 支撑 2.1.92 附近 Stream idle timeout 集中报告（社区，2026-04）
@@ -226,11 +225,12 @@ bash 那边：`BASH_DEFAULT_TIMEOUT_MS` 默认 120000 毫秒（2 分钟），`BA
 [^2]: [Error reference — Claude Code Docs](https://code.claude.com/docs/en/errors)（官方，核实于 2026-08）：「Response stalled mid-stream」20 秒横幅、`API_TIMEOUT_MS` 默认 600000 毫秒、横幅每次都出现即按网络问题处理。
 [^3]: [GH #26224](https://github.com/anthropics/claude-code/issues/26224)（社区，2026-02 起，Anthropic 有置顶回复确认在查）：卡在 thinking 5–20 分钟、token 用量不增长。
 [^4]: [Environment variables — Claude Code Docs](https://code.claude.com/docs/en/env-vars)（官方，核实于 2026-08）：`BASH_DEFAULT_TIMEOUT_MS` 默认 120000、`BASH_MAX_TIMEOUT_MS` 默认 600000。
+[^5]: [Error reference — Claude Code Docs](https://code.claude.com/docs/en/errors)（官方，核实于 2026-08-15）：`CLAUDE_CODE_MAX_RETRIES` 默认 10，v2.1.186 起上限 15；v2.1.199 起设置 `CLAUDE_CODE_RETRY_WATCHDOG` 会移除该上限，并对 429/529 无限重试（原文用词为 indefinitely）。
 
 ---
 
 <sub>难度 中级 · 排错题 · 主线 Claude Code</sub>
 
-<sub>**时效**：环境变量默认值、错误页阈值与重试规则、`--safe-mode` / `/doctor` 行为已于 2026-08-03 对照官方 troubleshooting、errors、env-vars 三页核实。**已知不确定**：「token 不涨的卡死」根因来自社区报告加官方在 issue 里的排查确认，未见正式复盘；分诊用的 60 秒阈值是经验值，非官方标准。**易变**：折叠块里的版本号与 issue 状态（2.1.92、2.1.208、#46987、#63875）随版本更新即失效，照做前先看 issue 是否已关闭。</sub>
+<sub>**时效**：环境变量默认值、错误页阈值与重试规则、`--safe-mode` / `/doctor` 行为已于 2026-08-15 对照官方 troubleshooting、errors、env-vars 三页核实。**已知不确定**：「token 不涨的卡死」根因来自社区报告加官方在 issue 里的排查确认，未见正式复盘；分诊用的 60 秒阈值是经验值，非官方标准。**易变**：折叠块里的版本号与 issue 状态（2.1.92、2.1.208、#46987、#63875）随版本更新即失效，照做前先看 issue 是否已关闭。</sub>
 
 > 本篇个人实践（L4）：`[待补：BOSS 的实战经验/踩坑]`

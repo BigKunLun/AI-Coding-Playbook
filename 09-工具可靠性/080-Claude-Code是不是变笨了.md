@@ -110,7 +110,7 @@ npm 装的话是 `npm install -g @anthropic-ai/claude-code@<版本>`。
 { "env": { "DISABLE_AUTOUPDATER": "1" } }
 ```
 
-`DISABLE_AUTOUPDATER` 只停后台检查，`claude update` 仍能手动跑；要连手动路径一起封死才用 `DISABLE_UPDATES`。
+`DISABLE_AUTOUPDATER` 只停后台检查，`claude update` 仍能手动跑；要连手动路径一起封死才用 `DISABLE_UPDATES`。另外注意：如果你按第 3 步配过 `minimumVersion` 且目标版本低于它，自动更新和 `claude update` 都会拒装低于下限的版本，走这条路回滚前要先删掉或下调该项（用安装脚本直接装指定版本不受此限）。
 
 **怎么确认做到位**：回滚后跑回归集，判据回到旧水平。回滚了还是差，说明不是版本问题，回第 2 步重做对照。
 
@@ -119,9 +119,9 @@ npm 装的话是 `npm install -g @anthropic-ai/claude-code@<版本>`。
 <details>
 <summary>effort 的三个行为细节（最常被误当成「变笨」）</summary>
 
-- **默认值随模型不同**。支持 effort 的模型默认是 `high`，但 Opus 4.7 默认 `xhigh`。切模型时 effort 跟着变——你没动任何配置，行为却变了。
+- **默认值随模型不同**。支持 effort 的模型默认是 `high`，但 Opus 4.7 默认 `xhigh`[^3]。切模型时 effort 跟着变——你没动任何配置，行为却变了。
 - **级别不跨模型可比**。同一个名字在不同模型上代表的实际值不同；模型不支持你设的级别时会落到它支持的最高档（`xhigh` 在 Opus 4.6 上跑成 `high`）。
-- **prompt 里写 `ultrathink` 只是加一条上下文指令**，发给 API 的 effort 级别不变；`think hard` / `think more` 这类说法完全不是关键词，就是普通文本。别把它当算力开关。
+- **prompt 里写 `ultrathink` 只是加一条上下文指令**，发给 API 的 effort 级别不变；`think hard` / `think more` 这类说法完全不是关键词，就是普通文本[^3]。别把它当算力开关。
 
 会话内可用的相关命令：`/model` 看当前模型和 effort，`/effort` 直接设级别（`/effort auto` 恢复模型默认），`/status` 看账号与上下文，`/feedback` 提报。
 
@@ -143,11 +143,14 @@ npm 装的话是 `npm install -g @anthropic-ai/claude-code@<版本>`。
 
 2026 年 4 月那次，官方复盘认定三项变更：3 月 4 日把 Claude Code 默认 reasoning effort 从 high 降到 medium；3 月 26 日清理闲置会话旧思考的改动有 bug，变成每轮都清；4 月 16 日一条「减少啰嗦」的系统提示词让编码质量掉了 3%[^1]。模型权重一个字没动，用起来确实变差了——这也是为什么第 2 步的对照实验管用。
 
-### 社区量化尝试的两个坑
+<details>
+<summary>社区量化尝试的两个坑</summary>
 
 有人分析自己 6852 个会话的 JSONL 日志，统计「读文件次数 / 编辑次数」比值、循环推理次数、用户打断次数；也有人每天跑 SWE-bench 子集追踪曲线。方向是对的——把感受换成能重放的数字——但都被指出过问题：前者的 thinking 长度指标理解错了（`redact-thinking` 是纯 UI 层隐藏，不改思考预算）；后者只用 50 道题，被 SWE-bench 作者当场指出方差太大，要 300 题、每天跑 5 到 10 次才有统计意义。
 
 结论很朴素：你不需要统计学上严谨的 benchmark，只需要一组能重放、能对照的固定题目，够你分清「工具变了」还是「我变了」。
+
+</details>
 
 ## 别这么干
 
@@ -184,24 +187,31 @@ npm 装的话是 `npm install -g @anthropic-ai/claude-code@<版本>`。
 
 - [An update on recent Claude Code quality reports](https://www.anthropic.com/engineering/april-23-postmortem) —— 支撑「三项变更 + API 直连未受影响 + 各自修复版本」（官方，2026-04）
 - [A postmortem of three recent issues](https://www.anthropic.com/engineering/a-postmortem-of-three-recent-issues) —— 支撑「事故只影响部分流量切片、16% 受影响」（官方，2025-09）
-- [Model configuration](https://code.claude.com/docs/en/model-config) —— 支撑「模型别名会漂移、effort 级别取值与优先级」（官方，2026-08 访问）
-- [Advanced setup](https://code.claude.com/docs/en/setup) —— 支撑「指定版本安装、stable 频道、minimumVersion、DISABLE_AUTOUPDATER」（官方，2026-08 访问）
+- [Model configuration](https://code.claude.com/docs/en/model-config) —— 支撑「模型别名会漂移、effort 级别取值与优先级」（官方，2026-08-15 访问）
+- [Advanced setup](https://code.claude.com/docs/en/setup) —— 支撑「指定版本安装、stable 频道、minimumVersion、DISABLE_AUTOUPDATER」（官方，2026-08-15 访问）
 - [Claude Status](https://status.claude.com/) —— 第 1 步四个客观量里的状态页来源（官方，持续更新）
+
+<details>
+<summary>更多社区讨论</summary>
+
 - [GH #42796](https://github.com/anthropics/claude-code/issues/42796) —— 支撑「6852 会话行为指标分析」及官方关于 `redact-thinking` 是 UI 层变更的澄清（社区 + 官方回复，2026-04）
 - [HN 46810282](https://news.ycombinator.com/item?id=46810282) —— 支撑「每日跑 SWE-bench 子集、50 题样本量被作者指出方差过大」（社区，2026-02）
 - [HN 47878905](https://news.ycombinator.com/item?id=47878905) / [HN 47660925](https://news.ycombinator.com/item?id=47660925) / [HN 46978710](https://news.ycombinator.com/item?id=46978710) —— 支撑「这是周期性复发话题」（社区，2026 上半年）
-- [V2EX 1213794](https://www.v2ex.com/t/1213794) —— 中文社区同题讨论，有人开源 `llm-iq-test` 做固定题目回测（社区，2026）
+- [V2EX 1213794](https://www.v2ex.com/t/1213794) —— 中文社区同题讨论（社区，2026）
+- [V2EX 1226728](https://www.v2ex.com/t/1226728) / [llm-iq-test](https://github.com/yukun181013/llm-iq-test) —— 开源的「降智」固定题目回测脚本（社区，2026）
 - [Reddit r/ClaudeCode: Anyone else's Claude Code terrible lately](https://www.reddit.com/r/ClaudeCode/comments/1t6wdjy/anyone_elses_claude_code_terrible_lately) —— 典型症状帖，可对照自己的描述（社区，2026）
 
+</details>
+
 [^1]: [An update on recent Claude Code quality reports](https://www.anthropic.com/engineering/april-23-postmortem)（官方，2026-04）：三项客户端变更、API 直连未受影响、三个修复版本。
-[^2]: [Advanced setup — Claude Code Docs](https://code.claude.com/docs/en/setup)（官方，2026-08 访问）：`autoUpdatesChannel` 与 `minimumVersion` 的语义。
-[^3]: [Model configuration — Claude Code Docs](https://code.claude.com/docs/en/model-config)（官方，2026-08 访问）：effort 取值范围与设置优先级。
+[^2]: [Advanced setup — Claude Code Docs](https://code.claude.com/docs/en/setup)（官方，2026-08-15 访问）：`autoUpdatesChannel` 与 `minimumVersion` 的语义、指定版本安装、`DISABLE_AUTOUPDATER` 与 `DISABLE_UPDATES` 的区别。
+[^3]: [Model configuration — Claude Code Docs](https://code.claude.com/docs/en/model-config)（官方，2026-08-15 访问）：effort 取值范围、各模型默认档与降档规则、设置优先级、非交互模式行为、`ultrathink` 关键字语义。
 [^4]: [A postmortem of three recent issues](https://www.anthropic.com/engineering/a-postmortem-of-three-recent-issues)（官方，2025-09）：2025-08-31 最差时段约 16% 的 Sonnet 4 请求受影响。
 
 ---
 
 <sub>难度 中级 · 排错题 · 主线 Claude Code，横向 Cursor / Copilot / Gemini CLI</sub>
 
-<sub>**时效**：配置项（`effortLevel`、`autoUpdatesChannel`、`minimumVersion`、`DISABLE_AUTOUPDATER`）与两次事故复盘内容核实于 2026-08-04。**已知不确定**：社区 issue 与 HN 帖的票数、评论数为当时快照，未复核；「仓库热度第一」是社区观感，无官方口径。**易变**：所有具体版本号（2.1.89 / 2.1.101 / 2.1.116）只是历史示例，各模型的 effort 默认档随模型迭代变化，用前回查 model-config。</sub>
+<sub>**时效**：配置项（`effortLevel`、`autoUpdatesChannel`、`minimumVersion`、`DISABLE_AUTOUPDATER`）、指定版本安装命令与两次事故复盘内容核实于 2026-08-15，均以官方文档为准。**已知不确定**：社区量化尝试的数字（6852 会话、50 题 / 300 题）来自社区帖当时内容，未独立复核。**易变**：所有具体版本号（2.1.89 / 2.1.101 / 2.1.116）只是历史示例，各模型的 effort 默认档随模型迭代变化，用前回查 model-config。</sub>
 
 > 本篇个人实践（L4）：`[待补：BOSS 的实战经验/踩坑]`

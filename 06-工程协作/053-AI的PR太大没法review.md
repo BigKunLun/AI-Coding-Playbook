@@ -45,7 +45,10 @@ flowchart TD
 - **先搞清成本模型再定触发频率。** 每次 review 平均 15–25 美元，「每次 push 后都审」会按推送次数成倍计费[^3]。高流量仓库用手动触发或「PR 创建后只审一次」。
 - **人只看它标出来的和它够不到的。** 它产出的是信号，不是放行决定 —— 见「为什么」第 3 节。
 
-**用 `REVIEW.md` 把它调成团队分流器。** Code Review 会读仓库根目录的 `REVIEW.md`，内容作为优先级最高的指令块逐字注入到 review 流水线每个 agent 的系统提示里[^3]。针对「PR 太大太多」最有用的是三类调参：
+**用 `REVIEW.md` 把它调成团队分流器。** Code Review 会读仓库根目录的 `REVIEW.md`，内容作为优先级最高的指令块逐字注入到 review 流水线每个 agent 的系统提示里[^3]。针对「PR 太大太多」最有用的三类调参：收窄 Important 定义、给 Nit 封顶、写「不要 review」清单。想让机审信号变成硬门禁，官方还给了在 CI 里按严重度计数拦截的口子。模板和命令见折叠块。
+
+<details>
+<summary>REVIEW.md 调参模板与 CI 门禁命令</summary>
 
 ```markdown
 # Review instructions
@@ -80,13 +83,15 @@ gh api repos/OWNER/REPO/check-runs/CHECK_RUN_ID \
 
 CI 里判 `normal != 0` 就让流水线失败。注意这是**你**在给它加门禁，不是机审自己拦截，仍然符合「决定权在人和流程」的边界。
 
+</details>
+
 **提 PR 前先本地自审。** 不装 GitHub App 也能审：任意 Claude Code 会话里跑 `/code-review`，默认审「本分支领先 upstream 的提交」加「未提交的改动」，加 `--fix` 会直接把修复应用到工作区。这正好落地了 K8s 那条「先自己 verify 再提 PR」。
 
 ### 第三层：重构 review 流程本身
 
 - **保留代码结构，别把 diff 当一整块平铺文本。** Salesforce 的做法是在分析时保留文件、函数、模块这些结构边界[^1]。
 - **逐步展开，按风险分层。** 让 reviewer 分批拿到上下文，优先暴露架构决策、涉及安全的改动和高风险区域。人先看那高风险的 10%，而不是从第 1 行平铺看到第 1000 行。
-- **异步跑，结果预存。** 机审最多要跑五分钟。Salesforce 让它在 PR 创建时就异步跑完、结果存下来，人来看时秒出。Cloudflare 是同样思路、规模更大：5169 个仓库、48095 个合并请求上跑了 131246 次 review，中位耗时 3 分 39 秒，人工「破窗」（绕过机审强行处理）只有 288 次，占 0.6%。
+- **异步跑，结果预存。** Salesforce 实测大 PR 的完整分析最多要跑五分钟，等不起，所以让它在 PR 创建时就异步跑完、结果存下来，人来看时秒出[^1]。Cloudflare 是同样思路、规模更大：5169 个仓库的 48095 个合并请求上跑了 131246 次 review，中位耗时 3 分 39 秒；人工「破窗」（绕过机审强行处理）只有 288 次，占合并请求数的 0.6%[^6]。
 
 ### 第四层：定治理规则
 
@@ -117,7 +122,7 @@ CI 里判 `normal != 0` 就让流水线失败。注意这是**你**在给它加�
 
 Salesforce 工程团队量化了这个失衡：引入 AI 编码后代码量增加约 30%，单个 PR 经常膨胀到超过 20 个文件、1000 行改动，review 排队时间逐季度上升[^1]。
 
-但最扎心的发现不是排队变长，而是**最大那批 PR 的 review 时长开始见顶、甚至下降**。PR 越大本该审得越久，结果反过来了，唯一说得通的解释是 reviewer 面对 1000 行 diff 直接放弃、滑到底点 approve[^1]。这就是 [#040](../05-质量保证/040-怎么验证AI代码是真的对.md) 里说的 rubber stamp（橡皮图章，审查只走形式不真看内容）。
+但最扎心的发现不是排队变长，而是**最大那批 PR 的 review 时长开始见顶、甚至下降**。PR 越大本该审得越久，结果反过来了 —— Salesforce 的解读是 reviewer 已不再真正参与：彻底审完的代价超过感知收益时，人就默认走表面验证、没看懂也 approve[^1]。这就是 [#040](../05-质量保证/040-怎么验证AI代码是真的对.md) 里说的 rubber stamp（橡皮图章，审查只走形式不真看内容）。
 
 这条也是本篇唯一可量化的预警指标：把 PR 行数和 review 时长两条曲线放一起看，后者不随前者上升，人审这层就已经塌了。
 
@@ -125,15 +130,13 @@ Salesforce 工程团队量化了这个失衡：引入 AI 编码后代码量增�
 
 官方对 Claude Code Review 的定位很明确：发现的问题按严重度打标签，但既不批准也不拦截 PR；检查始终以 neutral（中性）结论结束，所以它永远不会通过分支保护规则挡住合并[^2]。
 
-Cloudflare 把话说得更直白：这不是人工 review 的替代品，至少以今天的模型还不是。
+Cloudflare 把话说得更直白：这不是人工 review 的替代品，至少以今天的模型还不是[^6]。
 
 所以 AI review 是分流器，不是守门员。它帮人省掉一部分明显问题，最终担责的仍是人 —— 想要硬门禁，得自己在 CI 里按严重度计数拦（见「怎么做」第二层）。
 
 ### 3. 开源侧是同一个病，只是先撞墙
 
-企业内部至少 PR 作者是同事，跑得掉找得到人。开源维护者面对的是陌生人批量投喂的 AI PR 和 issue，而提交量的增长不受任何成本约束。
-
-对企业团队来说，这段的意义不是围观：**当提交量增长不受成本约束时，评审侧一定会先崩。** 企业内部之所以还撑得住，只是因为工位和绩效构成了天然的提交限流。
+开源维护者面对的是陌生人批量投喂的 AI PR 和 issue，提交量增长不受任何成本约束。对企业团队的意义不是围观：**当提交量增长不受成本约束时，评审侧一定会先崩** —— 内部还撑得住，只是因为工位和绩效构成了天然的提交限流。
 
 <details>
 <summary>开源侧到底崩成什么样（curl / tldraw / Ghostty 的具体处置）</summary>
@@ -180,21 +183,22 @@ Cloudflare 把话说得更直白：这不是人工 review 的替代品，至少�
 
 - [Code Review — Claude Code Docs](https://code.claude.com/docs/en/code-review) —— 支撑机审机制、neutral 不拦截、`REVIEW.md` 逐字注入与调参、`gh + jq` 严重度门禁、15–25 美元/次定价与按推送计费（官方，2026-06）
 - [Scaling Code Reviews — Salesforce Engineering](https://engineering.salesforce.com/scaling-code-reviews-adapting-to-a-surge-in-ai-generated-code/) —— 支撑「代码量 +30%」「20 文件 / 1000 行」「最大 PR review 时长见顶」三个数字，以及保留结构 / 逐步展开 / 异步预存三条流程做法（实践，2026）
-- [Orchestrating AI Code Review at scale — Cloudflare](https://blog.cloudflare.com/ai-code-review/) —— 支撑「机审不是人审替代品」与规模化数字（4.8 万 MR、中位 3 分 39 秒、破窗 0.6%）（实践，2026）
+- [Orchestrating AI Code Review at scale — Cloudflare](https://blog.cloudflare.com/ai-code-review/) —— 支撑「机审不是人审替代品」与规模化数字（4.8 万 MR、中位 3 分 39 秒、破窗占 MR 数 0.6%）（实践，2026）
 - [Pull Request Process — kubernetes.dev](https://www.kubernetes.dev/docs/guide/pull-requests/) —— 支撑第四层全部治理规则：禁大型 AI PR、第一遍 review 不许甩锅、必须声明、必须人亲自回复、说不清为什么就关掉（官方政策，2026）
 - [AI Slopageddon and the OSS Maintainers — RedMonk](https://redmonk.com/kholterhoff/2026/02/03/ai-slopageddon-and-the-oss-maintainers/) —— 支撑折叠块里 curl / tldraw / Ghostty / Stefan Prodan 的全部事实（社区，2026-02）
 - [OSS maintainers demand ability to block Copilot-generated PRs — Socket](https://socket.dev/blog/oss-maintainers-demand-ability-to-block-copilot-generated-issues-and-prs) —— 支撑「更早的信号」：Andi McClure 的表态与 curl 早期的 AI 声明要求（社区，2025-05）
 
-[^1]: [Scaling Code Reviews — Salesforce Engineering](https://engineering.salesforce.com/scaling-code-reviews-adapting-to-a-surge-in-ai-generated-code/)（实践，2026）：引入 AI 后代码量增加约 30%，单个 PR 常超 20 文件 / 1000 行；最大那批 PR 的 review 时间开始见顶甚至下降，说明 reviewer 已不再真正参与。
+[^1]: [Scaling Code Reviews — Salesforce Engineering](https://engineering.salesforce.com/scaling-code-reviews-adapting-to-a-surge-in-ai-generated-code/)（实践，2026）：引入 AI 后代码量增加约 30%，单个 PR 常超 20 文件 / 1000 行；最大那批 PR 的 review 时间开始见顶甚至下降，原文解读为 reviewer 已不再真正参与（彻底审的代价超过感知收益时，默认走表面验证或未理解即批准）；大 PR 的完整语义分析最多要跑五分钟，故在 PR 创建时异步执行、结果预存。
 [^2]: [Code Review — Claude Code Docs](https://code.claude.com/docs/en/code-review)（官方，2026-06）：发现的问题按严重度打标签，既不批准也不拦截 PR；检查始终以 neutral 结论结束，因此不会通过分支保护规则挡住合并。
 [^3]: 同上：`REVIEW.md` 的内容作为优先级最高的指令块逐字注入 review 流水线里每个 agent 的系统提示；每次 review 平均 15–25 美元，「每次 push 后都审」按推送次数计费。
 [^4]: [Pull Request Process — kubernetes.dev](https://www.kubernetes.dev/docs/guide/pull-requests/)（官方政策，2026）：不要把 AI 生成改动的第一遍 review 留给 reviewer；作者须理解每一处改动；解释不了改动为什么这么做，PR 会被关掉。
 [^5]: [AI Slopageddon and the OSS Maintainers — RedMonk](https://redmonk.com/kholterhoff/2026/02/03/ai-slopageddon-and-the-oss-maintainers/)（社区，2026-02）：curl 关停六年、累计 8.6 万美元的赏金计划及其比例数据，tldraw 自动关闭外部 PR，Ghostty 永久封禁，「AI 垃圾正在 DDoS 开源维护者」。
+[^6]: [Orchestrating AI Code Review at scale — Cloudflare](https://blog.cloudflare.com/ai-code-review/)（实践，2026）：5169 个仓库、48095 个合并请求、131246 次 review，中位耗时 3 分 39 秒；人工破窗 288 次，占合并请求数的 0.6%；并明确「这不是人工 review 的替代品，至少以今天的模型还不是」。
 
 ---
 
 <sub>难度 中级 · 流程题 + 治理 · 主线 Claude Code，横向 Cursor / Copilot</sub>
 
-<sub>**时效**：定价与机制事实（机审 15–25 美元/次、三种触发模式的计费方式、结论为 neutral 不拦截、`REVIEW.md` 逐字注入且优先级最高、`gh + jq` 解析严重度）已于 2026-07-18 对照官方 code-review 文档核实；Salesforce 三个数字同日对照原文确认；开源侧事实（curl 赏金关停的年限 / 金额 / 比例、2026-01 的 16 小时 7 份提交、tldraw、Ghostty、Stefan Prodan 引述）已于 2026-08-03 对照 RedMonk 原文核实。**已知不确定**：「非生成代码超 400 行就拆」是本篇给的可操作阈值，不是任何一方的官方数字；第二层涉及托管 Code Review 的全部做法（`REVIEW.md` 调参、`gh + jq` 严重度门禁、触发频率与计费）**基于官方文档整理、本篇作者未实跑**，已按可选层标注；tldraw 的暂停是维护者自述的临时措施，当前是否仍生效需自行确认。**易变**：Claude Code Review 目前是 research preview（面向 Team / Enterprise 订阅），定价和形态可能随正式发布调整。</sub>
+<sub>**时效**：定价与机制事实（机审 15–25 美元/次、三种触发模式的计费方式、结论为 neutral 不拦截、`REVIEW.md` 逐字注入且优先级最高且不展开 `@import`、违反 `CLAUDE.md` 只标 nit 级、`gh + jq` 解析严重度）已于 2026-08-15 对照官方 code-review 文档逐条核实；Salesforce 数字（+30%、20 文件 / 1000 行、review 时长见顶、分析最长五分钟）、Cloudflare 数字（5169 仓库 / 48095 MR / 131246 次 review / 中位 3 分 39 秒 / 破窗 288 次占 MR 数 0.6%）、K8s 五条治理规则（含「禁大型 AI 生成 PR」为原文明文）、开源侧事实（curl 赏金关停的年限 / 金额 / 比例、2026-01 的 16 小时 7 份提交、tldraw、Ghostty、Stefan Prodan 引述）均于 2026-08-15 对照各原文核实。**已知不确定**：「非生成代码超 400 行就拆」是本篇给的可操作阈值，不是任何一方的官方数字；第二层涉及托管 Code Review 的全部做法（`REVIEW.md` 调参、`gh + jq` 严重度门禁、触发频率与计费）**基于官方文档整理、本篇作者未实跑**，已按可选层标注；tldraw 的暂停与 Ghostty 的封禁规则均以 RedMonk 2026-02 报道为准，当前是否仍生效未再核实，需自行确认。**易变**：Claude Code Review 截至 2026-08-15 仍为 research preview（面向 Team / Enterprise 订阅，Zero Data Retention 组织不可用），定价和形态可能随正式发布调整。</sub>
 
 > 本篇个人实践（L4）：`[待补：BOSS 的实战经验/踩坑]`

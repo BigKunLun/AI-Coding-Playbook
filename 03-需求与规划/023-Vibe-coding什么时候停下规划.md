@@ -34,7 +34,7 @@ flowchart TD
 | 项目特征 | 决策 | 理由 |
 |---------|------|------|
 | 一次性脚本、探索性 POC、返工成本约等于 0 | 随便 vibe | Karpathy 自己就把它限定在「用完即扔的周末项目」 |
-| 单功能、0.5–2 天、你自己能完全看懂 | 可以 vibe，但要配验收检查 | 满足黄金法则，加个通过/失败检查兜底 |
+| 单功能、0.5–2 天、你自己能完全看懂 | 可以 vibe，但要配验收检查 | 满足黄金法则（能向别人逐行讲清），加个通过/失败检查兜底 |
 | 中型功能、超过 3 天、跨多文件多层 | 必须切 spec | 越过复杂度悬崖，vibe 必然绕成乱麻 |
 | 有真实用户、生产代码、要对结果负责 | 不许纯 vibe | 讲不清的代码不进生产 |
 | 上下文已过半，或同一问题纠正超两次 | 立刻停 | 上下文已被失败尝试污染 |
@@ -94,7 +94,7 @@ vibe 翻车的直接机制就在这里：没有能跑的检查时，「看起来
 
 **给一个可以记住的比例。** 有开发者把自己一个上线项目的工时全程记了下来：vibe 出可用原型约 1 小时，做到真能上线约 100 小时[^2]。多出来的 99 小时去向很清楚 —— UI 在移动端的实际排版、把核心生成逻辑跑 200 次找边界情况、S3/Lambda/环境变量/域名这类基础设施、限流和并发、权限收口、以及上线当天的退款与救火。没有一项是「写业务代码」。
 
-配合 Tom Cargill 的老规律讲给非技术管理者最有效：前 90% 的代码占掉前 90% 的时间，剩下 10% 的代码占掉另外 90% 的时间。AI 压缩的是第一个 90%，第二个 90% 一点没动。
+配合 Tom Cargill 的老规律讲给非技术管理者最有效：前 90% 的代码占掉前 90% 的时间，剩下 10% 的代码占掉另外 90% 的时间[^7]。AI 压缩的是第一个 90%，第二个 90% 一点没动。
 
 **把 demo 定性成「一次需求确认」，不是「一次交付」。** 文档和线框图很难把一个功能讲明白，做个原型能让一大群人瞬间理解要做什么[^3]。同一串讨论里也有反面的补充：真正难的从来不是写代码，是写错了代码 —— 错的需求、错的用户、没人在乎的场景。合起来正好是你要的话术：demo 的价值是把错的需求提前暴露掉，这个价值很大，但它兑现的是需求确认，不是工程交付。
 
@@ -130,7 +130,7 @@ Simon Willison 的澄清更直接：vibe coding 跟「用 LLM 帮忙写代码」
 
 Cursor CEO Michael Truell 的说法是同一个机制：闭着眼不看代码，让 AI 在摇晃的地基上一层层往上盖，最后整个东西开始垮[^6]。地基的脆弱是一点点累积的，崩塌是一瞬间的。社区的描述也一致：AI 会把自己绕成一团解不开的乱麻，做出让代码库无法维护的架构决定 —— 到那一步不是某一行代码错了，而是架构的决策链断了，无法局部修复。
 
-换更强的模型救不了这个。中文社区的分析说得准：一周以上的复杂任务，一次性生成的 spec 几乎必然失效，这不是模型能力问题，而是问题复杂度的自然结果。
+换更强的模型救不了这个。中文社区有分析指出：一周以上的复杂任务，一次性生成的 spec 几乎必然失效，这不是模型能力问题，而是问题复杂度的自然结果——这与本节的机制一致，但它是社区观点，不是已确证的共识。
 
 ### 官方的答案是把探索和执行分开
 
@@ -155,9 +155,9 @@ Simon Willison 给了最可操作的停止判据 —— 生产级 AI 辅助编�
 |------|------------|--------|----------------|------------|
 | **「防 vibe」的原生机制** | plan mode（只读强制）+ `/clear` + AskUserQuestion 访谈 | `.cursor/rules` + chat 引导，无原生只读强制 | `agents.md` + Spec Kit `/speckit.clarify` | Spec Kit 集成 |
 | **从 vibe 切 spec 的入口** | 连按两次 `Shift+Tab` 进 plan mode | 依赖人工切换 + rules | `/speckit.specify` | `/speckit.specify` |
-| **上下文管理** | 官方明确「上下文窗口是最重要的资源」+ 两次纠正即 `/clear` | Composer 上下文压缩（社区反馈会引发死循环） | Spec Kit 把上下文固化进 spec 文档 | Spec Kit 同上 |
+| **上下文管理** | 官方明确「上下文窗口是最重要的资源」+ 两次纠正即 `/clear` | Composer 自动上下文压缩 | Spec Kit 把上下文固化进 spec 文档 | Spec Kit 同上 |
 
-vibe coding 翻车是工具无关的现象 —— Cursor 被称作「vibe coding 的摇篮」，它的 CEO 反而最先出来警告这套玩法的危险。差异在各家「防 vibe 刹车」的成熟度：Claude Code 的只读 plan mode 加 `/clear` 加访谈式提问，把「停下来规划」做得最顺；Cursor 更多依赖人工纪律；Copilot 和 Gemini CLI 靠 Spec Kit 的关卡流程。
+vibe coding 翻车是工具无关的现象 —— Cursor 是 vibe coding 最流行的载体之一，它的 CEO 反而最先出来警告这套玩法的危险。差异在各家「防 vibe 刹车」的成熟度：Claude Code 的只读 plan mode 加 `/clear` 加访谈式提问，把「停下来规划」做得最顺；Cursor 更多依赖人工纪律；Copilot 和 Gemini CLI 靠 Spec Kit 的关卡流程。
 
 </details>
 
@@ -170,7 +170,8 @@ vibe coding 翻车是工具无关的现象 —— Cursor 被称作「vibe coding
 - [#031 plan → execute → review 的正确循环怎么做？](../04-执行工作流/031-plan-execute-review循环.md) —— 本篇讲何时从 vibe 切 spec，031 讲 spec 定了之后怎么一轮轮执行
 - [#012 上下文窗口要爆了怎么办？](../02-上下文工程/012-上下文窗口要爆了.md) —— 本篇「上下文过半」这条信号的机制层展开在 012
 
-**参考资料**
+<details>
+<summary>参考资料</summary>
 
 - [Andrej Karpathy: vibe coding 定义推文 — X/Twitter](https://x.com/karpathy/status/1886192184808149383) —— 支撑本篇对 vibe coding 的定义与「只适合用完即扔的周末项目」这条生死线（一手，2025-02-02）
 - [Best practices for Claude Code — Claude Code Docs](https://code.claude.com/docs/en/best-practices) —— 支撑「先探索再规划再写码」「上下文越满性能越差」「看起来做完就停」「同一问题纠正超两次即 `/clear`」「先信任后验证的鸿沟」五条论断（官方，2026-06）
@@ -185,6 +186,9 @@ vibe coding 翻车是工具无关的现象 —— Cursor 被称作「vibe coding
 - [The AI Coding Death Spiral — r/vibecoding 1m37cyl](https://www.reddit.com/r/vibecoding/comments/1m37cyl/the_ai_coding_death_spiral/) —— 支撑「为速度而来、为 debug 地狱而留」的死亡螺旋描述（社区，2025；Reddit 反爬，片段级）
 - [I Tried Vibe Coding and I Need Advice — r/webdev 1qdbsyf](https://www.reddit.com/r/webdev/comments/1qdbsyf/i_tried_vibe_coding_and_i_need_advice/) —— 支撑「项目超出单次上下文窗口后极易发生上下文腐烂」（社区，2025；Reddit 反爬，片段级）
 - [Cursor CEO says vibe coding will make your app crumble — r/ExperiencedDevs 1q75d1w](https://www.reddit.com/r/ExperiencedDevs/comments/1q75d1w/cursor_ceo_says_vibe_coding_will_make_your/) —— 开发者社区对 Truell 发言的讨论，主源仍为 Fortune（社区，2025-12）
+- [Ninety–ninety rule — Wikipedia](https://en.wikipedia.org/wiki/Ninety%E2%80%93ninety_rule) —— 支撑 Tom Cargill「两个 90%」规律的出处考证（社区，2026-08 核实）
+
+</details>
 
 [^1]: [Best practices for Claude Code](https://code.claude.com/docs/en/best-practices)（官方，2026-06）：直接开写会产出解错问题的代码，用 plan mode 把探索和执行分开；上下文窗口填得快、越满性能越差；同一问题纠正超过两次就 `/clear` 重开；没有能跑的检查时「看起来做完」是唯一信号；常见失败模式含「先信任后验证的鸿沟」。
 [^2]: [The 100 hour gap between a vibecoded prototype and a working product](https://kanfa.macbudkowski.com/vibecoding-cryptosaurus)（实践，2026-03）：作者记录单个上线项目的完整工时，原型约 1 小时、上线约 100 小时，并列出 99 小时的去向。这是单人单项目的记录，不是统计结论。
@@ -192,11 +196,12 @@ vibe coding 翻车是工具无关的现象 —— Cursor 被称作「vibe coding
 [^4]: [Andrej Karpathy 推文](https://x.com/karpathy/status/1886192184808149383)（一手，2025-02-02）：完全交给感觉、忘掉代码存在；永远 Accept All、不看 diff、报错原样粘回；并限定「用完即扔的周末项目还行」。
 [^5]: [Vibe coding — Simon Willison](https://simonwillison.net/2025/Mar/19/vibe-coding/)（社区权威，2025-03）：vibe coding 指「用 LLM 造软件但不 review 它写的代码」，与「用 LLM 辅助写代码」不是一回事；生产级黄金法则是讲不清的代码不进仓库。
 [^6]: [Cursor CEO warns vibe coding builds shaky foundations — Fortune](https://fortune.com/article/cursor-ceo-vibe-coding-warning/)（一手新闻，2025-12）：Michael Truell 在 Fortune Brainstorm AI 大会的发言。
+[^7]: [Ninety–ninety rule — Wikipedia](https://en.wikipedia.org/wiki/Ninety%E2%80%93ninety_rule)（社区，2026-08-15 核实）：该规律出自 Jon Bentley 1985 年 9 月 CACM《Programming Pearls》专栏，引述贝尔实验室的 Tom Cargill。它是行业流传的经验轶事（刻意加总成 180% 的自嘲），不是统计数据。
 
 ---
 
 <sub>难度 中级 · 场景题 · 主线 Claude Code，横向 Cursor / Copilot / Gemini CLI</sub>
 
-<sub>**时效**：Karpathy 原推、Simon Willison、V2EX、India Today、官方 best-practices 于 2026-07-18 核实存活；「demo 到产品的预期差」一节的两条 HN 外链与原文于 2026-08-03 核实。**已知不确定**：Fortune 原文返回 403（付费墙或反爬），Truell 引语另有 India Today 转述交叉印证；几条 Reddit 出处受反爬限制，引文来自搜索片段，正文只当佐证。「原型 1 小时 / 上线 100 小时」是单人单项目记录，不是统计值。**易变**：Spec Kit 的 `/speckit.*` 命令名随版本变化；信号清单与决策框架不依赖具体版本。</sub>
+<sub>**时效**：官方 best-practices 于 2026-08-15 重新核实，原文确有「corrected Claude more than twice on the same issue → run `/clear`」「trust-then-verify gap」「没有可跑的检查时 looks done 是唯一信号」三条表述，「超过两次」是官方原文数字而非本篇引申；Cargill「两个 90%」出处同日核实。Karpathy 原推、Simon Willison、V2EX、India Today 于 2026-07-18 核实存活；「demo 到产品的预期差」一节的两条 HN 外链与原文于 2026-08-03 核实。**已知不确定**：Fortune 原文返回 403（付费墙或反爬），Truell 引语另有 India Today 转述交叉印证；几条 Reddit 出处受反爬限制，引文来自搜索片段，正文只当佐证。「原型 1 小时 / 上线 100 小时」是单人单项目记录，不是统计值。**易变**：Spec Kit 的 `/speckit.*` 命令名随版本变化；信号清单与决策框架不依赖具体版本。</sub>
 
 > 本篇个人实践（L4）：`[待补：BOSS 的实战经验——你 vibe coding 翻过车吗？在什么项目、什么复杂度拐点翻的？你个人用 Simon Willison 黄金法则还是「两次纠正即停」？从 vibe 切 spec 你通常用 plan mode 还是直接手写 SPEC.md？]`

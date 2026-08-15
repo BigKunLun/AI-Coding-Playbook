@@ -9,7 +9,7 @@
 | `git diff --name-only` 列出的文件多于你要求的 | 逐个追问为什么动它，说不清就 `git checkout <文件>` 还原 | 动手前先产出 PLAN.md 的文件清单，事后拿它对账 |
 | 代码写得漂亮，但解的不是你要的那道题 | 回 PLAN 重来，别在实现上打补丁 | 先 UNDERSTAND 产出 SPEC.md，再进 plan mode |
 | 计划里出现「相关模块」「若干配置」「顺便优化」 | 打回重写，要求逐行写具体文件路径 | 用四段式模板下 PLAN 指令，别只说「做个计划」 |
-| 同一个问题在这个会话里已经纠正 2 次还没对 | `/clear`，换更好的初始 prompt 重开 | 上下文被失败方案污染了，救不回来 |
+| 同一个问题在这个会话里已经纠正 2 次仍不对 | `/clear`，换更好的初始 prompt 重开 | 上下文被失败方案污染了，救不回来 |
 | agent 说「完成了」，你没有任何测试输出 | 要它贴命令和原始输出，再派 subagent 对着 diff 挑刺 | 闸门 B 卡死：证据而非断言 |
 
 ```mermaid
@@ -36,7 +36,10 @@ flowchart TD
 
 ### 第 0 步：判断这次要不要走完整循环
 
-官方给了一条可以机械执行的判据：**如果你能用一句话描述这次的 diff，就跳过规划**[^3]。
+官方给了一条可以机械执行的判据：**如果你能用一句话描述这次的 diff，就跳过规划**[^3]。反过来，改动跨 2 个以上文件、你不熟这块代码、或方案有多个选项，任一条命中就走完整循环。
+
+<details>
+<summary>逐情形对照表（含官方点名的探索例外）</summary>
 
 | 情形 | 走不走循环 |
 |------|-----------|
@@ -47,6 +50,8 @@ flowchart TD
 | 你在试水、想看 agent 怎么理解问题 | 故意不规划，但产出不许直接上线 |
 
 最后一行是官方点名的例外：有时模糊的 prompt 恰恰是对的，因为你想在约束它之前先看它怎么理解问题。但这是「我在探索」的特权，一旦进入「这个功能要上线」，规划就不是可选项。
+
+</details>
 
 ### 循环全貌：四个阶段，两道闸门
 
@@ -81,6 +86,11 @@ flowchart TD
 
 ### Phase ②：PLAN 指令模板（别只说「做个计划」）
 
+只说「做个计划」会得到一段散文。用下面折叠块里的四段式模板下指令：文件清单、改动性质、分步顺序、每步验证命令，缺一段打回。
+
+<details>
+<summary>四段式 PLAN 指令模板（可复制）</summary>
+
 ```text
 现在是 plan mode，你不准改任何文件。读 @SPEC.md 和相关代码，产出 PLAN.md，
 严格按下面四段结构写，缺一段视为不合格：
@@ -107,7 +117,14 @@ SPEC.md 里没提到的文件，单独标 [范围外] 并说明为什么必须�
 最后单独列一节"我不确定的地方"，把需要我拍板的选项列出来，不要自己替我决定。
 ```
 
+</details>
+
 #### 闸门 A：可勾选的清单，不是「感觉对不对」
+
+六条逐条勾，全过才放行；第 1、4、5 条能用命令机械地查，第 2、3、6 条必须人工过。
+
+<details>
+<summary>六条清单与配套命令（可复制）</summary>
 
 - [ ] 第 1 段每一行都是具体文件路径，没有「相关模块」「若干配置」。
 - [ ] 第 2 段所有标了 `[范围外]` 的文件，你逐个确认过必须动。说不清一个就打回。
@@ -115,9 +132,6 @@ SPEC.md 里没提到的文件，单独标 [范围外] 并说明为什么必须�
 - [ ] 第 3 段的步骤数 == 第 4 段的「验证：」行数。
 - [ ] 没有任何一步的描述里出现「顺便」「同时优化」「重构一下」。
 - [ ] 「我不确定的地方」你已逐条回答，没留给 agent 自己拍板。
-
-<details>
-<summary>前四条可以直接用命令查（可复制）</summary>
 
 ```bash
 # 步骤数 vs 验证命令数，两个数字必须相等
@@ -136,13 +150,20 @@ grep -nE '相关模块|若干|等文件|顺便|同时优化' PLAN.md && echo "�
 
 用单独的 `PLAN-FILES.txt` 而不是拿正则从 PLAN.md 里抠路径，是因为正则挡不住真实项目的文件名 —— `src/config.yaml`、`Dockerfile`、`package.json`、`.github/workflows/ci.yml` 这类要么没有常见代码扩展名，要么根本没有扩展名，靠「反引号 + 扩展名白名单」匹配会大面积漏掉，首跑就是满屏假告警。
 
+命令查不了的三条：第 2 条的 `[范围外]` 文件要逐个确认必要性，第 3 条要把 SPEC 验收标准逐条映射到步骤编号，第 6 条的不确定项要你亲自拍板。
+
 </details>
 
 ### Phase ③：EXECUTE，小步 + 留证据
 
-退出 plan mode，让 agent 做三件事：严格按 PLAN.md 的步骤编号实现、每步做完报编号；每步跑该步对应的「验证：」命令并贴原始输出；测试失败时改实现不改测试（见 [030 篇](./030-AI写的测试不可信.md)）。另有一条硬规则：**同一个 session 里同一个问题纠正超过 2 次，就 `/clear` 重来** —— 官方的判断是上下文已被失败方案污染，继续修只会越修越偏。
+退出 plan mode，让 agent 做三件事：严格按 PLAN.md 的步骤编号实现、每步做完报编号；每步跑该步对应的「验证：」命令并贴原始输出；测试失败时改实现不改测试（见 [030 篇](./030-AI写的测试不可信.md)）。另有一条硬规则：**同一个 session 里同一个问题纠正 2 次仍不对，就 `/clear` 重来** —— 官方的判断是上下文已被失败方案污染，继续修只会越修越偏。
 
 #### 闸门 B：文件清单对账
+
+拿 `PLAN-FILES.txt` 跟 `git diff --name-only` 的输出做 `diff`。**怎么确认生效**：`diff` 无输出、退出码为 0 —— 这是全部改动都在计划内的样子。
+
+<details>
+<summary>对账命令与假告警排查（可复制）</summary>
 
 ```bash
 # 计划清单（agent 产出的纯路径文件，一行一个路径）
@@ -155,19 +176,17 @@ git diff --name-only <基线分支>... | sort -u > /tmp/actual-files.txt
 diff /tmp/plan-files.txt /tmp/actual-files.txt
 ```
 
-**怎么确认生效**：`diff` 无输出、命令退出码为 0，终端不打印任何内容 —— 这是全部改动都在计划内的样子。有差异时输出形如 `3a4` 加一行 `> src/config.yaml`。
+有差异时输出形如 `3a4` 加一行 `> src/config.yaml`。
 
 注意路径写法要一致：`PLAN-FILES.txt` 必须是仓库根目录起算的相对路径，跟 `git diff --name-only` 的输出格式一样，否则会出现「同一个文件两边都列了却对不上」的假告警。首跑如果左右两列大面积不一致，先检查是不是路径前缀问题，再怀疑范围蔓延。
+
+</details>
 
 出现 `>` 开头的行就是范围蔓延 —— 这正是「让它改一个功能，它动了一堆无关文件」的检出点。逐个追问，说不清就 `git checkout` 还原那个文件。同时要求 agent 贴全量测试的原始输出，而不是「测试都过了」这句话。
 
 ### Phase ④：REVIEW，对抗式验收
 
-| 档位 | 做法 | 适用 |
-|------|------|------|
-| 自验证 | agent 自己跑测试/截图，贴原始输出 | 任何任务，今天就能用 |
-| `/goal` 会话级 | 把验收标准设成会话终止条件，每轮由独立评估器复查 | 中等任务，不想全程盯 |
-| 对抗式 review | 全新上下文的 subagent 只看 diff + 验收标准挑刺 | 正确性要求高 / 长任务 |
+三档按强度选（多解看场景）：自验证（agent 自己跑测试贴原始输出，任何任务今天就能用）、`/goal` 会话级（验收标准设成会话终止条件，每轮由独立评估器复查，适合不想全程盯的中等任务）、对抗式 review（全新上下文的 subagent 只看 diff + 验收标准挑刺，适合正确性要求高的长任务）[^6]。
 
 <details>
 <summary>对抗式 review 的可复制 prompt</summary>
@@ -216,7 +235,7 @@ claude --permission-mode plan
 - **退出而不批准**：再按一次 `Shift+Tab`。
 - **批准即离开**：批准计划会退出 plan mode 并切到你选的权限模式，Claude 随即开始改文件。想再规划一次，`Shift+Tab` 循环回去或再用 `/plan` 前缀。
 - **编辑计划**：`Ctrl+G` 在默认文本编辑器里打开计划直接改，比来回让 agent 改快得多。很多人不知道这个。
-- **plan mode 不等于完全只读**：它挡的是编辑。命令执行在 auto mode 可用且 `useAutoModeDuringPlan` 打开时由分类器判断放行，**这两个前提如今默认都成立** —— `useAutoModeDuringPlan` 官方默认为开，而 2026-08-14 起 auto 又成了 Pro / Max / Team 新会话的默认档[^5]。也就是说「规划阶段里 shell 命令不问你直接跑」从例外变成了常态。在开了 bypass permissions 的会话里，plan mode 的拦截更是根本不生效。别拿它当安全沙箱，要真隔离用 `/sandbox` 或容器。
+- **plan mode 不等于完全只读**：它挡的是编辑。命令执行在 auto mode 可用且 `useAutoModeDuringPlan` 打开时由分类器判断放行，**这两个前提如今默认都成立** —— `useAutoModeDuringPlan` 官方默认为开，而 Pro / Max / Team 计划下新会话的内置默认档就是 auto[^5]。也就是说「规划阶段里 shell 命令不问你直接跑」从例外变成了常态。在开了 bypass permissions 的会话里，plan mode 的拦截更是根本不生效。别拿它当安全沙箱，要真隔离用 `/sandbox` 或容器。
 
 **用 `opusplan` 让「想」和「做」分开花算力**：plan mode 里用 Opus 做架构决策，退出后自动切 Sonnet 做代码生成。四种配置入口（官方按优先级从高到低）：
 
@@ -252,29 +271,21 @@ export ANTHROPIC_MODEL=opusplan  # 3. 环境变量（只影响这一个会话）
 
 ### 官方把「探索」和「执行」强行分开，是因为 agent 默认不假思索动手
 
-Anthropic 最佳实践里有一个独立小节叫「Explore first, then plan, then code」，理由一句话：让 Claude 直接上手写代码，可能写出优雅地解错了题的代码[^1]。plan mode 就是覆盖前两步的只读闸门 —— Claude 能读文件、能跑命令探索、能写计划，但在你批准之前编辑一直被挡住。
-
-为什么值得官方单独点名？因为你给它一句「实现登录」，它的第一反应是敲代码，而不是反问用什么鉴权方案、session 还是 token。plan mode 用只读约束强行打断这个默认行为。Flask 作者 Armin Ronacher 拆过它注入的系统提示词：内部是一个四阶段状态机 —— 理解、设计、评审对齐、写出最终计划，全程只读，提示词里写死了「你绝不能做任何编辑」。本质上就是一段注入的提示词加一个状态机。
+Anthropic 最佳实践里有一个独立小节叫「Explore first, then plan, then code」，理由一句话：让 Claude 直接上手写代码，可能写出优雅地解错了题的代码[^1]。plan mode 就是覆盖前两步的只读闸门 —— Claude 能读文件、能跑命令探索、能写计划，但在你批准之前编辑一直被挡住。为什么值得官方单独点名？因为你给它一句「实现登录」，它的第一反应是敲代码，而不是反问用什么鉴权方案、session 还是 token。plan mode 用只读约束强行打断这个默认行为。Flask 作者 Armin Ronacher 拆过它注入的系统提示词：本质上是一段预置提示词，把工作流建议成四个阶段 —— 理解、设计、评审对齐、写出最终计划，全程只读，提示词里写死了「你绝不能做任何编辑」；他强调这套约束靠的是提示词强化，不是技术层面的强制。
 
 ### 计划质量是执行准确率的主导因素，不是玄学
 
 直接理由是机制上的：计划把「要改哪些文件、每步怎么验证」写成可对账的清单，闸门 A、B 才有东西可查。没有计划，你手上唯一的判据就是「看着还行」。
 
-有研究显示计划质量会显著影响 agent 执行表现 —— CHI 2025 一项 N=248 的实证研究把 LLM agent 称为「双刃剑」，缺少高质量计划时 agent 会同时损害信任和绩效，有计划且执行阶段有人工参与时报告了约 66% 的执行准确率[^2]。但这个数字出自受控实验任务，实验条件与日常写代码场景差异大，仅作方向参考，别拿它当自己项目的预期值。
-
-机制上的理由更能解释为什么 vibe coding（不给约束、让 agent 自由发挥）在探索期爽、在生产期崩：没有高质量计划这个前置条件，agent 的自主性是有害的。
+有研究显示计划质量会显著影响 agent 执行表现 —— CHI 2025 一项 N=248 的实证研究把 LLM agent 称为「双刃剑」，缺少高质量计划时 agent 会同时损害信任和绩效；论文报告高质量计划（质量评满分 5）下平均执行准确率约 66.7%，低质量计划下只有约 2%[^2]。但这些数字出自受控实验任务，实验条件与日常写代码场景差异大，仅作方向参考，别拿它当自己项目的预期值。机制上的理由更能解释为什么 vibe coding（不给约束、让 agent 自由发挥）在探索期爽、在生产期崩：没有高质量计划这个前置条件，agent 的自主性是有害的。
 
 > 个人观点（小C）：很多人把「规划」理解成写一大段需求文档甩给 agent，这是另一种极端。真正有效的规划是对话式的 —— agent 反问你，你回答，它把歧义收敛成方案，你再审。规划的本质是在动手前把假设暴露出来，不是把文档写得更长。
 
 ### Review 必须对抗，但不能照单全收
 
-官方对 review 的两条要求：一是拿证据说话，让 Claude 贴测试输出和跑过的命令，审查证据比你自己重跑一遍快；二是引入独立检查 —— 跑在全新 subagent 上下文里的 reviewer 只看到 diff 和你给的标准，看不到产生这次改动的推理过程。
+官方对 review 的两条要求：一是拿证据说话，让 Claude 贴测试输出和跑过的命令，审查证据比你自己重跑一遍快；二是引入独立检查 —— 跑在全新 subagent 上下文里的 reviewer 只看到 diff 和你给的标准，看不到产生这次改动的推理过程。为什么必须换上下文？因为写代码的上下文天然会替自己刚写的代码辩护，让它「自查」它会顺着刚才的思路找理由。
 
-为什么必须换上下文？因为写代码的上下文天然会替自己刚写的代码辩护，让它「自查」它会顺着刚才的思路找理由。
-
-但对抗有代价，官方专门给了反向提醒：一个被要求找缺口的 reviewer 通常总会报出一些，哪怕代码本身没问题；追着每一条 finding 改会导致过度设计[^4]。所以 reviewer 的 prompt 必须写死「只报影响正确性或明确需求的缺口，其余标为可选」。
-
-Simon Willison 给跳过 review 的后果起了个名字：house of cards code（纸牌屋代码）—— 看起来很稳，在你没测的边界条件下一触即溃。
+但对抗有代价，官方专门给了反向提醒：一个被要求找缺口的 reviewer 通常总会报出一些，哪怕代码本身没问题；追着每一条 finding 改会导致过度设计[^4]。所以 reviewer 的 prompt 必须写死「只报影响正确性或明确需求的缺口，其余标为可选」。Simon Willison 给跳过 review 的后果起了个名字：house of cards code（纸牌屋代码）—— 看起来很稳，在你没测的边界条件下一触即溃。
 
 ## 别这么干
 
@@ -287,7 +298,7 @@ Simon Willison 给跳过 review 的后果起了个名字：house of cards code�
 <details>
 <summary>还有三条低频但要命的反模式</summary>
 
-- ❌ **在同一个 session 里反复纠正同一个问题。** 上下文会被失败方案污染，纠正 2 次还不对就 `/clear` 重来，用更好的初始 prompt。（官方）
+- ❌ **在同一个 session 里反复纠正同一个问题。** 上下文会被失败方案污染，纠正 2 次仍不对就 `/clear` 重来，用更好的初始 prompt。（官方）
 - ❌ **把 plan mode 当安全沙箱。** 它挡的是文件编辑；在 bypass permissions 会话里连编辑都不挡，命令执行也可能被分类器放行。需要真隔离用 `/sandbox` 或容器。（官方 permission-modes）
 - ❌ **写完 spec 就忘。** spec 是活文档，执行中发现的变更要回写，否则 spec、plan、实现三者会漂移。（单一社区来源：Spec Kit discussion #775，未见官方结论）
 
@@ -320,10 +331,11 @@ Simon Willison 给跳过 review 的后果起了个名字：house of cards code�
 **参考资料**
 
 - [Best practices for Claude Code — Claude Code Docs](https://code.claude.com/docs/en/best-practices) —— 支撑「先探索再规划再编码」「一句话能描述 diff 就跳过规划」「让 Claude 访谈你」「对抗式 review 及其过度设计警告」「纠正 2 次就 /clear」（官方，2026-08 核实）
-- [Choose a permission mode — Claude Code Docs](https://code.claude.com/docs/en/permission-modes) —— 支撑 plan mode 的四种进入方式、`Ctrl+G` 编辑计划、批准选项、`defaultMode: "plan"`、bypass permissions 下不拦截（官方，2026-08 核实）
+- [Choose a permission mode — Claude Code Docs](https://code.claude.com/docs/en/permission-modes) —— 支撑 plan mode 的四种进入方式、`Ctrl+G` 编辑计划、批准选项、`defaultMode: "plan"`、bypass permissions 下不拦截、Pro / Max / Team 内置默认档为 auto（官方，2026-08-15 复核）
+- [Keep Claude working toward a goal — Claude Code Docs](https://code.claude.com/docs/en/goal) —— 支撑 `/goal` 把验收标准设为会话终止条件、每轮由独立评估器复查（官方，2026-08-15 核实）
 - [Model configuration — Claude Code Docs](https://code.claude.com/docs/en/model-config) —— 支撑 `opusplan` 别名定义、四种配置入口、`opusplan[1m]`、两个默认模型环境变量（官方，2026-08 核实）
-- [Plan-Then-Execute: An Empirical Study of User Trust and Team Performance (CHI 2025)](https://arxiv.org/abs/2502.01390) —— 支撑 N=248、约 66% 执行准确率、无高质量计划时 agent 损害信任与绩效（学术，2025）
-- [What Actually Is Claude Code's Plan Mode? — Armin Ronacher](https://lucumr.pocoo.org/2025/12/17/what-is-plan-mode/) —— 支撑 plan mode 是「注入提示词 + 四阶段状态机」这个拆解（社区权威，2025-12）
+- [Plan-Then-Execute: An Empirical Study of User Trust and Team Performance (CHI 2025)](https://arxiv.org/abs/2502.01390) —— 支撑 N=248、高质量计划下约 66.7% 执行准确率、无高质量计划时 agent 损害信任与绩效（学术，2025，2026-08-15 核对全文）
+- [What Actually Is Claude Code's Plan Mode? — Armin Ronacher](https://lucumr.pocoo.org/2025/12/17/what-is-plan-mode/) —— 支撑 plan mode 是「预置提示词 + 四阶段工作流、约束全靠提示强化」这个拆解（社区权威，2025-12，2026-08-15 复核原文）
 - [brainstorming SKILL.md — obra/superpowers](https://github.com/obra/superpowers/blob/main/skills/brainstorming/SKILL.md) —— 支撑强制设计先行流程与「Too Simple To Need A Design」反模式（社区/开源，2025-2026）
 - [writing-plans SKILL.md — obra/superpowers](https://github.com/obra/superpowers/blob/main/skills/writing-plans/SKILL.md) —— 支撑「假设执行者零上下文、任务拆到 2-5 分钟」（社区/开源，2025-2026）
 - [executing-plans skill — Claude Plugin Hub](https://www.claudepluginhub.com/skills/obra-superpowers-2/executing-plans) —— 支撑逐步执行 + 检查点验收（社区，2025-2026）
@@ -334,15 +346,16 @@ Simon Willison 给跳过 review 的后果起了个名字：house of cards code�
 - [Spec Kit Discussion #775](https://github.com/github/spec-kit/discussions/775) —— 支撑「spec/plan/实现三者漂移」这条反模式（社区，2025）
 
 [^1]: [Best practices for Claude Code](https://code.claude.com/docs/en/best-practices)（官方，2026-08 核实）：让 Claude 直接上手写代码，可能产出解错了题的代码；用 plan mode 把探索和执行分开。
-[^2]: [Plan-Then-Execute (CHI 2025) — arXiv:2502.01390](https://arxiv.org/abs/2502.01390)（学术，2025）：N=248，高质量计划配合必要的人工执行参与时约 66% 执行准确率。该数字与实验任务设定出自论文全文，本库仅核实到摘要级，实验条件（任务类型、准确率如何判定）未确证，正文只作方向性佐证。
+[^2]: [Plan-Then-Execute (CHI 2025) — arXiv:2502.01390](https://arxiv.org/abs/2502.01390)（学术，2025，2026-08-15 核对 arXiv 全文）：N=248、六类日常任务；论文原文为「the average execution accuracy for tasks with a high-quality plan (plan quality = 5) is 66.7%」，低质量计划约 1.8%；准确率按最终执行结果是否正确判定（容忍无风险的冗余动作）。实验任务是日常助理类任务而非写代码，正文只作方向性佐证。
 [^3]: [Best practices for Claude Code](https://code.claude.com/docs/en/best-practices)（官方，2026-08 核实）：能用一句话描述 diff 就跳过规划；方案不确定、跨多文件、对代码不熟这三种情况必须规划。
 [^4]: [Best practices for Claude Code](https://code.claude.com/docs/en/best-practices)（官方，2026-08 核实）：被要求找缺口的 reviewer 通常会报出一些，即使工作本身没问题；追着每条 finding 改会导致过度设计。
-[^5]: [CC Docs: Permission modes](https://code.claude.com/docs/en/permission-modes)（官方，2026-08-13 访问）：`useAutoModeDuringPlan` 默认为开（原文「which it is by default」），开启时规划阶段的 shell 命令交由分类器审而不再弹窗；同页另注明 2026-08-14 起 auto 成为 Pro / Max / Team 新会话的默认权限档。
+[^5]: [CC Docs: Permission modes](https://code.claude.com/docs/en/permission-modes)（官方，2026-08-15 复核）：`useAutoModeDuringPlan` 默认为开（原文「which it is by default」），开启时规划阶段的 shell 命令交由分类器审而不再弹窗；同页注明 Pro / Max / Team 计划的内置起始权限档为 auto（原文「On Pro, Max, and Team plans, the built-in starting mode is auto mode」，需 CLI v2.1.228+）。此前草稿引用的「2026-08-14 起生效」具体日期在当前官方页面已不可见，本文不再采用。
+[^6]: [Keep Claude working toward a goal — Claude Code Docs](https://code.claude.com/docs/en/goal)（官方，2026-08-15 核实）：`/goal` 把你给的条件设为会话终止条件，每轮结束由一个独立的小模型评估器对照全量对话判断是否达成，未达成则把原因注入下一轮继续做。
 
 ---
 
-<sub>难度 中级 · 流程题 · 主线 Claude Code，横向 Cursor / Copilot</sub>
+<sub>难度 中级 · 流程题 · 主线 Claude Code，横向 Cursor / Copilot · 解法档位：主线「plan → execute → review 分阶段 + 两道闸门」为官方有定论；Phase ④ review 三档为多解看场景，按正文所列适用条件选</sub>
 
-<sub>**时效**：plan mode 的进入方式（`Shift+Tab` / `/plan` / `--permission-mode plan` / `defaultMode`）、`Ctrl+G` 编辑计划、批准计划的选项、`opusplan` 别名与四种配置入口，已于 2026-08-03 对照官方 permission-modes 与 model-config 文档逐条核对。闸门 A / B 的文件清单对账已于 2026-08-04 改为「agent 直接产出 `PLAN-FILES.txt` 纯路径清单」，替换掉原先靠「反引号 + 扩展名白名单」正则抠路径的写法 —— 后者会漏掉 `Dockerfile`、`package.json`、`src/config.yaml` 这类文件，导致首跑满屏假告警。**已知不确定**：CHI 2025 论文（arXiv:2502.01390）真实存在，N=248 与「低质量计划损害信任」已在摘要确认；「约 66% 执行准确率」与「2×2 因子设计」出自论文全文，本库仅核实到摘要级，实验条件未确证，正文已把它降为方向性佐证而非立论论据。**易变**：Claude Code 版本行为随小版本变化快，本文所述以 v2.1.2xx 系列文档为准。</sub>
+<sub>**时效**：plan mode 的进入方式（`Shift+Tab` / `/plan` / `--permission-mode plan` / `defaultMode`）、`Ctrl+G` 编辑计划、批准计划的选项、`opusplan` 别名与四种配置入口，已于 2026-08-03 对照官方 permission-modes 与 model-config 文档逐条核对；2026-08-15 复核 permission-modes、best-practices 与 `/goal` 官方页：`/goal` 为官方命令、`useAutoModeDuringPlan` 默认为开、Pro / Max / Team 内置默认档为 auto 均已确认，此前草稿写的「2026-08-14 起生效」具体日期在当前官方页面已不可见，已删去。闸门 A / B 的文件清单对账已于 2026-08-04 改为「agent 直接产出 `PLAN-FILES.txt` 纯路径清单」，替换掉原先靠「反引号 + 扩展名白名单」正则抠路径的写法 —— 后者会漏掉 `Dockerfile`、`package.json`、`src/config.yaml` 这类文件，导致首跑满屏假告警。CHI 2025 论文（arXiv:2502.01390）的「66.7% 执行准确率」已于 2026-08-15 核对 arXiv 全文确认，条件是高质量计划（质量评满分），任务为日常助理类而非写代码，正文仅作方向性佐证。**易变**：Claude Code 版本行为随小版本变化快，本文所述以 v2.1.2xx 系列文档为准。</sub>
 
 > 本篇个人实践（L4）：`[待补：BOSS 的实战经验——你跳过规划直接动手被坑 / 认真规划后一次过的对比案例，或 superpowers 三段链启用后返工率的变化]`

@@ -6,7 +6,7 @@
 
 | 你看到的 | 立刻做 | 不想再犯 |
 |---|---|---|
-| 有人用个人 Pro / Max 账号跑公司代码 | 停用，换公司主体的商用订阅，并关掉训练开关 | managed settings 里禁用消费账号 |
+| 有人用个人 Pro / Max 账号跑公司代码 | 停用个人账号（顺手在其隐私设置里关掉训练开关），换公司主体的商用订阅（商用默认不训练） | managed settings 里禁用消费账号 |
 | 工作目录里躺着 `.env`、云凭证 | 挪进 secret manager，permissions 加 denyRead | 运行时注入，不落盘 |
 | 全量 auto-approve，或 MCP 全放行 | 关掉 bypass，MCP 清单入 git 走白名单 | 官方不对任何 MCP server 做安全审计 |
 | 只 deny 了 `curl` / `wget` | 补上 `ping`、`nslookup`、`dig`、`host`，开 `/sandbox` | 出网通道不止一条，要纵深防御 |
@@ -14,7 +14,7 @@
 | 以为买了 Enterprise 就自动有 ZDR | 找客户团队按 organization 单独开通 | ZDR 不含在标准 Enterprise 套餐里 |
 | 怀疑密钥已泄露 | 先轮换全部可能被读到的密钥，再查证据 | 排错六步见「怎么做」最后一节 |
 
-部署模式怎么选，按数据敏感度和密钥归属决定：
+三条红线和数据政策边界属「有定论」，官方文档明写；部署模式属「多解看场景」，按数据敏感度和密钥归属决定，下面这张决策树就是结论：
 
 ```mermaid
 flowchart TD
@@ -35,7 +35,7 @@ flowchart TD
 
 | 场景 | 选什么 | 依据 |
 |------|--------|------|
-| 个人项目 / 开源 / 非敏感 | 默认 Claude API（Pro/Max/API），但要关掉训练开关 | 商用条款默认不训练，消费版务必手动关 |
+| 个人项目 / 开源 / 非敏感 | Pro / Max（消费版，务必手动关训练开关）或 API（走商用条款） | 消费版默认给你训练选项、开了留 5 年；API 走商用条款，默认不训练 |
 | 一般企业代码 | Team 或 Enterprise 商用条款，标准 30 天留存 | 商用默认不训练、不留 5 年 |
 | 强敏感 / 强合规（金融、医疗、SOX/PCI） | ZDR Enterprise（单独谈），或自托管 Bedrock / Vertex / Microsoft Foundry | ZDR 无服务端持久化；Bedrock/Vertex 数据留在你的云租户，可用 KMS/CMEK 客户托管密钥 |
 | 核心资产 / 机密代码库（尤其国内公司用国外 agent） | 明令禁止接任何外部模型，只放边缘业务代码走 AI | 控制力最强的一档，社区里真在用的做法；数据一旦出境就不可逆 |
@@ -44,14 +44,18 @@ flowchart TD
 
 **合同层还有一条：个人卡付的订阅写公司生产代码等于没有保障。**Anthropic 商用条款的赔偿只覆盖 paid use（付费商用用量），GitHub Copilot 的 IP 赔偿只给 Business 和 Enterprise。个人 Pro 出了第三方 IP 索赔，合同上没人替你兜。这不是法律意见，签约前找法务核当前版本条款。
 
-**怎么确认做对了**：第一，打开账单页，确认签约主体是公司而不是个人卡付的 Pro。第二，别信「公司说走内网了」，自己查实际通道：
+**怎么确认做对了**：第一，打开账单页，确认签约主体是公司而不是个人卡付的 Pro。第二，别信「公司说走内网了」，自己查实际通道（命令见折叠块）——看到 `CLAUDE_CODE_USE_BEDROCK=1` 就是走 AWS，什么都没有就是直连 Anthropic。
+
+<details>
+
+<summary>查实际通道的两条命令</summary>
 
 ```bash
 claude config list
 env | grep -E 'CLAUDE_CODE_USE_BEDROCK|CLAUDE_CODE_USE_VERTEX|ANTHROPIC_BASE_URL|ANTHROPIC_MODEL'
 ```
 
-看到 `CLAUDE_CODE_USE_BEDROCK=1` 就是走 AWS，什么都没有就是直连 Anthropic。
+</details>
 
 ### 第二层：技术护栏
 
@@ -82,7 +86,7 @@ env | grep -E 'CLAUDE_CODE_USE_BEDROCK|CLAUDE_CODE_USE_VERTEX|ANTHROPIC_BASE_URL
 }
 ```
 
-手动补上 `ping`、`nslookup`、`dig`、`host`，是对「DNS 外泄」那类攻击做纵深防御：即便官方已把它们移出自动白名单，显式 deny 能让它们连「批准一次」的机会都没有。具体配置项以你所在版本的 [permissions 文档](https://code.claude.com/docs/en/permissions) 为准。
+手动补上 `ping`、`nslookup`、`dig`、`host`，是对「DNS 外泄」那类攻击做纵深防御：研究者向官方提的修复建议就是把它们移出自动白名单（官方未公布 v1.0.4 的具体修复方式），显式 deny 能让它们连「批准一次」的机会都没有。具体配置项以你所在版本的 [permissions 文档](https://code.claude.com/docs/en/permissions) 为准。
 
 上面只列了 `.env` 和两个云凭证目录，实际该护住的敏感文件远不止这些——凭证的形态很杂，漏一类就等于没堵，完整 13 条如下：
 
@@ -108,7 +112,7 @@ env | grep -E 'CLAUDE_CODE_USE_BEDROCK|CLAUDE_CODE_USE_VERTEX|ANTHROPIC_BASE_URL
 }
 ```
 
-分四类看，就知道它为什么不能再短：包管理器凭证（`.npmrc`、`.pypirc`，直接连着发布权限）、云与容器凭证（AWS / gcloud / Docker / service account）、私钥文件（`.ssh`、`.pem`、`.key`），以及**agent 自身的配置文件**（`~/.claude.json`、`.claude/settings.json`、`.mcp.json`）——最后这类最容易漏：读到它就知道你的护栏长什么样，写进去就等于自己给自己提权，deny 之外还要靠 sandbox 兜住写入。
+分四类看，就知道它为什么不能再短：包管理器凭证（`.npmrc`、`.pypirc`，直接连着发布权限）、云与容器凭证（AWS / gcloud / Docker / service account）、私钥文件（`.ssh`、`.pem`、`.key`），以及**agent 自身的配置文件**（`~/.claude.json`、`.mcp.json`）——最后这类最容易漏：读到它就知道你的护栏长什么样，写进去就等于自己给自己提权，deny 之外还要靠 sandbox 兜住写入。
 
 顺带一条同样重要的：**别做宽泛 allow**。`Bash(*)`、`Bash(curl *)`、`Bash(npm *)`、`Bash(node *)`、`Bash(python *)` 这些看着方便，实际把整条命令通道敞开了——`npm` 能跑任意 script，`python` 能读任何文件。allow 只放固定低风险命令（`Bash(git status)`、`Bash(npm run lint)`、`Bash(npm test)`），网络请求、装依赖、执行脚本、改配置一律逐次确认。
 
@@ -118,7 +122,7 @@ env | grep -E 'CLAUDE_CODE_USE_BEDROCK|CLAUDE_CODE_USE_VERTEX|ANTHROPIC_BASE_URL
 
 ### 第二层补充：信任陌生仓库之前，先看它的 AI 指令入口
 
-`git clone` 完直接在里面开 agent，等于把这个仓库作者的指令当成了你自己的指令。仓库可以夹带 `.claude/skills/`、`.mcp.json`、hooks，在你信任工作区之后就自动生效。所以 trust 之前先过一遍八个位置——`.claude/`、`.claude/settings.json`、`.claude/skills/`、`.claude/hooks/`、`.mcp.json`、`package.json` 的 `scripts`、install / postinstall / prepare 脚本、GitHub Actions workflow。
+`git clone` 完直接在里面开 agent，等于把这个仓库作者的指令当成了你自己的指令。仓库可以夹带 `.claude/skills/`、`.mcp.json`、hooks，在你信任工作区之后就自动生效。所以 trust 之前先过一遍八个入口，逐个清单见折叠块。
 
 **怎么确认做对了**：clone 之后先别进目录开会话，在外面先跑折叠块里那两条排查命令（`ls -a repo/.claude repo/.mcp.json` 与 grep `postinstall`），有输出就人工看过再决定 trust。看到下面任何一条就停手：自动添加 MCP server、修改 Claude 全局配置、宽泛的 `allowed-tools`、hooks 自动执行、`curl | bash`、读 `.env` 或 `.ssh` 或云凭证、启动来路不明的本地 server。
 
@@ -196,9 +200,9 @@ MCP server 不是提示词，它是工具入口——本地 stdio server 本质�
       "Read(~/.claude.json)", "Read(./.mcp.json)"
     ],
     "ask": ["Bash(git push:*)"],
-    "disableBypassPermissionsMode": "disable",
-    "allowManagedPermissionRulesOnly": true
+    "disableBypassPermissionsMode": "disable"
   },
+  "allowManagedPermissionRulesOnly": true,
   "sandbox": {
     "enabled": true,
     "failIfUnavailable": true,
@@ -216,7 +220,7 @@ MCP server 不是提示词，它是工具入口——本地 stdio server 本质�
 }
 ```
 
-几个字段的用意：`allowManagedPermissionRulesOnly` 让用户和项目 settings 里的 allow / ask / deny 全部失效，只认这一份；`disableBypassPermissionsMode` 禁掉 `--dangerously-skip-permissions`；`allowUnsandboxedCommands: false` 关掉「沙箱里失败就退到沙箱外重试」的逃生口；`forceLoginMethod` 堵住员工用个人消费账号登录；`cleanupPeriodDays` 缩短本地明文会话记录的留存。各开关的行为细节和验收方法见 [#083](../09-工具可靠性/083-permissions和hooks拦不住.md)。
+几个字段的用意：`allowManagedPermissionRulesOnly`（注意它是顶层键，不放在 `permissions` 里）让用户和项目 settings 里的 allow / ask / deny 全部失效，只认这一份；`disableBypassPermissionsMode` 禁掉 `--dangerously-skip-permissions`；`allowUnsandboxedCommands: false` 关掉「沙箱里失败就退到沙箱外重试」的逃生口；`forceLoginMethod` 堵住员工用个人消费账号登录；`cleanupPeriodDays` 缩短本地明文会话记录的留存。各开关的行为细节和验收方法见 [#083](../09-工具可靠性/083-permissions和hooks拦不住.md)。
 
 **怎么确认做对了**：在受管机器上跑 `claude --dangerously-skip-permissions`，应当被拒绝启动；再在某个项目的 `.claude/settings.json` 里写一条 `"allow": ["Bash(curl:*)"]`，`/permissions` 里应当看不到它生效。
 
@@ -228,14 +232,18 @@ MCP server 不是提示词，它是工具入口——本地 stdio server 本质�
 
 先破一个误解：**大家一提许可证污染就只盯 GPL，其实没标 license 的公开代码风险更高。**MIT / BSD / Apache 都有署名要求；没标 license 的按默认全权保留，等于什么都不许你做。
 
-工具用 ScanCode：`pip install scancode-toolkit` 后跑 `scancode -clpi --json-pp scan.json ./src`（`-l` 许可证、`-c` 版权、`-p` 包清单、`-i` 文件信息），汇总命令见折叠块。
+工具用 ScanCode，安装、扫描、汇总命令与 CI 配置全在折叠块里。
 
 **怎么确认做对了**：两步。一是扫描输出的许可证集合，跟你们的允许清单一致（典型清单：MIT / Apache-2.0 / BSD-3-Clause）；冒出 GPL-3.0、AGPL-3.0，或 ScanCode 报了行号说某文件带第三方版权声明，就停下来人工看那几行。二是故意往测试分支粘一段带 GPL 头的文件并 push，CI 必须变红——光配上不验证等于没配，`allow_failure: true` 忘删就静默失效了。
 
 <details>
-<summary>许可证集合汇总命令 + 接进 CI 的完整配置（GitLab CI 示例，GitHub Actions 同理）</summary>
+<summary>ScanCode 安装与扫描命令、许可证集合汇总 + 接进 CI 的完整配置（GitLab CI 示例，GitHub Actions 同理）</summary>
 
 ```bash
+# 安装并扫描：-l 许可证、-c 版权、-p 包清单、-i 文件信息
+pip install scancode-toolkit
+scancode -clpi --json-pp scan.json ./src
+
 # 只看命中了哪些许可证
 python -c "import json;d=json.load(open('scan.json'));\
 print(sorted({m['license_expression'] for f in d['files'] for m in f.get('license_detections',[])}))"
@@ -256,6 +264,12 @@ license-scan:
 
 ### 排错：怀疑已经泄露了，怎么响应
 
+第一步永远是轮换所有可能被读到的密钥——先假设已泄露再查证据，完整六步见折叠块。
+
+<details>
+
+<summary>泄露响应六步表（轮换 → 查本地 → 查出网 → 定位注入源 → 加固 → 合规上报）</summary>
+
 | 步骤 | 动作 | 为什么 |
 |------|------|--------|
 | 1 | 立即轮换所有可能被读到的密钥（`.env`、CI secret、云凭证） | 先假设已泄露，轮换是最快的止血 |
@@ -264,6 +278,8 @@ license-scan:
 | 4 | 定位注入源：最近 review 过的外部 PR、文件、网页、MCP | 间接提示注入藏在「让 AI 读的内容」里 |
 | 5 | 升级 Claude Code 到最新版，收紧 deny 规则，开 sandbox | 已知 CVE 靠更新修复，护栏防下一次 |
 | 6 | 涉及客户数据或合规范围时走正式 incident 流程加合规上报 | SOX、PCI、GDPR 都有强制披露时限 |
+
+</details>
 
 上报安全漏洞本身走官方 [HackerOne program](https://code.claude.com/docs/en/security)，不要公开披露未修复的漏洞。
 
@@ -293,16 +309,16 @@ AI coding agent 和传统补全式 AI 的根本区别，是它能读整台机器
 
 ### AI 写的代码本身也不安全
 
-即使数据不外泄，AI 产出的代码也可能自带漏洞。Veracode 分析了 100 多个模型和 80 个编码任务，45% 的 AI 生成代码引入了 OWASP Top 10 类漏洞，Java 场景失败率超过 70%，而且新模型并没有变得更安全[^3]。原因指向 vibe coding：开发者依赖 AI 生成代码，通常不会明确定义安全要求。
+即使数据不外泄，AI 产出的代码也可能自带漏洞。Veracode 分析了 100 多个模型和 80 个编码任务，45% 的 AI 生成代码引入了 OWASP Top 10 类漏洞，Java 场景失败率 72%，而且新模型并没有变得更安全[^3]。原因指向 vibe coding：开发者依赖 AI 生成代码，通常不会明确定义安全要求。
 
 这条归 05 质量篇深讲，本篇只提示一点：安全红线里得有一层「AI 代码上线前过 SAST」（静态应用安全测试，即不运行代码、直接扫描源码找漏洞）。
 
 <details>
 <summary>四个真实已披露的事故（攻击链细节）</summary>
 
-**事故 A：CVE-2025-55284，Claude Code 经 DNS 偷密钥。**攻击链四步：Claude Code 早期把 `ping`、`nslookup`、`dig`、`host` 放进了无需确认就能跑的白名单；攻击者在一个「请 Claude review 一下」的文件里藏了间接提示注入指令；被注入的 Claude 去读 `.env` 和 `/proc/PID/environ`，用 `strings` 加 `grep` 抠出 API key；再把密钥编码成 DNS 子域名，用 `ping` 发给攻击者的服务器，全程零人工确认。官方的修复是把这几个命令移出自动白名单。研究者的点评更值得记：直接让 Claude 干坏事会被拒，用 `strings` 加 `grep` 绕一下就绕过了安全判断，所以防护不能只靠模型自觉。披露 2025-05-26，修复 2025-06-06（v1.0.4），CVSS 7.1[^2]。
+**事故 A：CVE-2025-55284，Claude Code 经 DNS 偷密钥。**攻击链四步：Claude Code 早期把 `ping`、`nslookup`、`dig`、`host` 放进了无需确认就能跑的白名单；攻击者在一个「请 Claude review 一下」的文件里藏了间接提示注入指令；被注入的 Claude 去读 `.env` 和 `/proc/PID/environ`，用 `strings` 加 `grep` 抠出 API key；再把密钥编码成 DNS 子域名，用 `ping` 发给攻击者的服务器，全程零人工确认。研究者提的修复建议是把这几个命令移出自动白名单；官方在 v1.0.4 修复，但未公布具体修复方式，是否照此建议实施未见官方确证。研究者的点评更值得记：直接让 Claude 干坏事会被拒，用 `strings` 加 `grep` 绕一下就绕过了安全判断，所以防护不能只靠模型自觉。披露 2025-05-26，修复 2025-06-06（v1.0.4），CVSS 7.1[^2]。
 
-**事故 B：IDEsaster，30+ 漏洞横扫所有主流 AI IDE。**研究者半年挖出 30 多个漏洞、24 个 CVE，涉及 Cursor、Windsurf、GitHub Copilot、Claude Code 等。核心论断是：所有 AI IDE 实际上都在威胁模型里忽略了底层软件（IDE 本身），把自己的功能当作天然安全。攻击手法覆盖提示注入（藏在不可见 Unicode、HTML 注释、投毒的 MCP 里）、数据外泄、改 `.vscode/settings.json` 实现 RCE（CVE-2025-53773，Copilot）、密钥收割。这说明安全问题是整个品类的系统性问题，不是某一家的个案。
+**事故 B：IDEsaster，30+ 漏洞横扫所有主流 AI IDE。**研究者半年挖出 30 多个漏洞、24 个 CVE，涉及 Cursor、Windsurf、GitHub Copilot、Claude Code 等（Claude Code 的问题以安全提醒方式处理，未单独发 CVE）。核心论断是：所有 AI IDE 实际上都在威胁模型里忽略了底层软件（IDE 本身），把自己的功能当作天然安全。攻击手法覆盖提示注入（藏在不可见 Unicode、HTML 注释、投毒的 MCP 里）、数据外泄、改 `.vscode/settings.json` 实现 RCE（CVE-2025-53773，Copilot）、密钥收割。这说明安全问题是整个品类的系统性问题，不是某一家的个案。
 
 **事故 C：Claudy Day，出网通道就是内置能力。**三个漏洞链成一次完整攻击：URL 参数里的隐形提示注入 + 用 Files API 外泄 + claude.com 的开放重定向。关键在于沙箱本身受限但允许连到 `api.anthropic.com`，于是内置能力被变成了外泄通道。教训是：只堵「明显的出网命令」不够，任何被允许的连接，哪怕是发往官方 API，都可能被当成外泄通道。漏洞已披露修复。
 
@@ -325,13 +341,11 @@ AI coding agent 和传统补全式 AI 的根本区别，是它能读整台机器
 
 ## 别这么干
 
-- ❌ **用个人 Pro / Max 账号跑公司代码。**消费版开了训练留存 5 年；且 Anthropic 赔偿只覆盖 paid use、Copilot IP 赔偿只给 Business / Enterprise，个人档的合同保障基本为零。
-- ❌ **以为「买了 Enterprise」或「走了 Bedrock」就等于零数据保留。**ZDR 要单独谈、逐组织开，且不覆盖 Bedrock / Vertex / Foundry。
+- ❌ **在账号和条款上想当然：用个人 Pro / Max 账号跑公司代码，或以为「买了 Enterprise」「走了 Bedrock」就等于零数据保留。**消费版开了训练留存 5 年，Anthropic 赔偿只覆盖 paid use、Copilot IP 赔偿只给 Business / Enterprise，个人档的合同保障基本为零；ZDR 要单独谈、逐组织开，且不覆盖 Bedrock / Vertex / Foundry。
 - ❌ **把 `.env` 和生产密钥留在工作目录里让 agent 随手能读。**这是 CVE-2025-55284 的直接前提，用 secret manager 运行时注入。
-- ❌ **只堵 `curl`、`wget` 就以为安全，或者无脑 auto-approve、全放行 MCP。**DNS 和官方 Files API 都能当外泄通道，官方也不审计任何 MCP server。
+- ❌ **护栏摆个样子：只堵 `curl`、`wget`，无脑 auto-approve、全放行 MCP，或把红线写进 CLAUDE.md 当「强制」。**DNS 和官方 Files API 都能当外泄通道，官方也不审计任何 MCP server；CLAUDE.md 是可被忽略的上下文，要强制就用 managed settings 加 hook——同理，配了 CI 许可证扫描却从没验证过能拦住，等于没配。
 - ❌ **clone 完直接在陌生仓库里开会话。**仓库能夹带 `.claude/skills/`、`.mcp.json`、hooks 和 postinstall 脚本，trust 之后自动生效，先过一遍那八个入口。
 - ❌ **让处理 issue / PR 的 AI workflow 和握着发布 token 的 workflow 共处一套 CI。**Cline 的 npm 投毒事件就发生在这个组合上。
-- ❌ **把红线写进 CLAUDE.md 当「强制」。**CLAUDE.md 是可被忽略的上下文，要强制就用 managed settings 加 hook；同理，配了 CI 许可证扫描却从没验证过能拦住，等于没配。
 
 <details>
 <summary>换成 Cursor / Copilot 呢</summary>
@@ -358,28 +372,28 @@ AI coding agent 和传统补全式 AI 的根本区别，是它能读整台机器
 
 **参考资料**
 
-- [Claude Code Data usage — Claude Code Docs](https://code.claude.com/docs/en/data-usage) —— 支撑「为什么」第二节全部政策边界：训练政策、留存周期、ZDR 适用范围、本地明文缓存、静态加密（官方，2026-07）
-- [Zero data retention — Claude Code Docs](https://code.claude.com/docs/en/zero-data-retention) —— 支撑「ZDR 需销售按组织开通、不覆盖 Bedrock/Vertex/Foundry」（官方，2026-08 查证）
+- [Claude Code Data usage](https://code.claude.com/docs/en/data-usage) 与 [Zero data retention](https://code.claude.com/docs/en/zero-data-retention) —— 支撑「为什么」第二节全部政策边界：训练政策、留存周期、ZDR 适用范围与「不覆盖 Bedrock/Vertex/Foundry」、本地明文缓存、静态加密（官方，2026-08-15 复核）
 - [Claude Code Security — Claude Code Docs](https://code.claude.com/docs/en/security) —— 支撑第二、三层的权限模型、sandbox、提示注入防护、MCP 不做安全审计、事故上报（官方，2026-07）
-- [Claude Code: Data Exfiltration with DNS (CVE-2025-55284) — embracethered](https://embracethered.com/blog/posts/2025/claude-code-exfiltration-via-dns-requests/) —— 支撑事故 A 的完整攻击链与修复版本（社区安全研究）
-- [Researchers Uncover 30+ Flaws in AI Coding Tools — The Hacker News](https://thehackernews.com/2025/12/researchers-uncover-30-flaws-in-ai.html) —— 支撑事故 B：IDEsaster 研究，24 CVE 横扫主流 AI IDE（社区，2025-12）
+- [Claude Code Settings](https://code.claude.com/docs/en/settings)、[Permissions](https://code.claude.com/docs/en/permissions) 与 [Sandboxing](https://code.claude.com/docs/en/sandboxing) —— 支撑 managed-settings 示例的字段名与层级（官方，2026-08-15 逐个核实）
+- [Claude Code: Data Exfiltration with DNS (CVE-2025-55284) — embracethered](https://embracethered.com/blog/posts/2025/claude-code-exfiltration-via-dns-requests/) 与 [NVD CVE-2025-55284](https://nvd.nist.gov/vuln/detail/CVE-2025-55284) —— 支撑事故 A 的完整攻击链、修复版本 v1.0.4 与 CVSS 评分（社区安全研究 + 官方漏洞库，2026-08-15 核实）
+- [Researchers Uncover 30+ Flaws in AI Coding Tools — The Hacker News](https://thehackernews.com/2025/12/researchers-uncover-30-flaws-in-ai.html) —— 支撑事故 B：IDEsaster 研究，24 CVE 横扫主流 AI IDE，含 CVE-2025-53773 归属 Copilot（社区，2025-12，2026-08-15 复核）
+- [NVD CVE-2025-49150](https://nvd.nist.gov/vuln/detail/CVE-2025-49150) —— 支撑横向对比表「Cursor 0.51.0 之前可经 JSON schema 下载触发任意 HTTP 请求外泄数据」（官方漏洞库，2026-08-15 核实）
 - [Claude.ai Prompt Injection Data Exfiltration — OASIS Security](https://www.oasis.security/blog/claude-ai-prompt-injection-data-exfiltration-vulnerability) —— 支撑事故 C：三漏洞链与 Files API 外泄通道（社区安全研究，2026-03）
 - [GenAI Code Security Report — Veracode](https://www.veracode.com/blog/genai-code-security-report/) —— 支撑「45% AI 代码引入 OWASP 漏洞、新模型未改善」（行业，2025，多源交叉）
 - [AI-written software creates hassles for security teams — Cybersecurity Dive](https://www.cybersecuritydive.com/news/ai-coding-security-concerns-projectdiscovery/818319/) —— 支撑折叠块末尾的 38% / 78% 调研数据（行业，2026-04）
 - [Anthropic Commercial Terms of Service](https://www.anthropic.com/legal/commercial-terms) —— 支撑「赔偿只覆盖 paid use」（官方，Effective 2025-06-17，2026-08 查证）
-- [GitHub Copilot Trust Center FAQ](https://copilot.github.trust.page/faq) —— 支撑「Copilot IP 赔偿只覆盖 Business / Enterprise」（官方，2026-08 查证）
+- [GitHub Copilot Trust Center FAQ](https://copilot.github.trust.page/faq) 与 [GitHub Copilot Plans](https://github.com/features/copilot/plans) —— 支撑「Copilot IP 赔偿只覆盖 Business / Enterprise」，官方把 IP indemnity 列为组织版与个人版的核心差异（官方，2026-08-15 查证）
 - [ScanCode Toolkit](https://github.com/aboutcode-org/scancode-toolkit/) 与 [license detection 原理](https://scancode-toolkit.readthedocs.io/en/latest/explanation/scancode-license-detection.html) —— 支撑出口检查一节的命令与「能定位到许可证片段起止行」（开源项目官方，2026-08 查证）
 - [不懂就问-AI 开发 — V2EX 1219306](https://www.v2ex.com/t/1219306) —— 支撑「国内公司用国外 agent 的三条真实路径」（社区，2026-06）
-- [MCP Security Best Practices](https://modelcontextprotocol.io/docs/tutorials/security/security_best_practices) —— 支撑「本地 stdio MCP server 来自不可信来源的风险、一键配置前应展示完整启动命令」（官方，2026-07 整理）
-- [OWASP：MCP Tool Poisoning](https://owasp.org/www-community/attacks/MCP_Tool_Poisoning) 与 [Invariant Labs：MCP Tool Poisoning Attacks](https://invariantlabs.ai/blog/mcp-security-notification-tool-poisoning-attacks) —— 支撑「工具响应与工具描述夹带隐藏指令、界面所见少于模型所见」（社区安全研究，2026-07 整理）
+- [MCP Security Best Practices](https://modelcontextprotocol.io/docs/tutorials/security/security_best_practices)、[OWASP：MCP Tool Poisoning](https://owasp.org/www-community/attacks/MCP_Tool_Poisoning) 与 [Invariant Labs：MCP Tool Poisoning Attacks](https://invariantlabs.ai/blog/mcp-security-notification-tool-poisoning-attacks) —— 支撑「本地 stdio MCP server 来自不可信来源的风险、工具响应与工具描述夹带隐藏指令、界面所见少于模型所见」（官方 + 社区安全研究，2026-07 整理）
 - [Claude Code Skills](https://code.claude.com/docs/en/skills) —— 支撑「Skill 可带脚本、可动态执行 shell、`allowed-tools` 预授权、项目 skill 在 trust 后生效」（官方，2026-07）
 - [Post-mortem: unauthorized Cline CLI npm publish](https://cline.ghost.io/post-mortem-unauthorized-cline-cli-npm/) —— 支撑事故 D 的全部事实与表述边界（厂商官方 post-mortem，事件 2026-02-17）
 - 敏感文件 deny 清单、陌生仓库 AI 入口检查清单、MCP 四项审计、managed-settings 示例 —— 个人研究与实践整理（2026-07）
 - [生成式人工智能服务管理暂行办法 — 中央网信办](https://www.cac.gov.cn/2023-07/13/c_1690898327029107.htm) —— 支撑数据出境话题的监管背景，第二十条涉及境外来源服务（官方，2023-07）
 
-[^1]: [Claude Code Data usage](https://code.claude.com/docs/en/data-usage) 与 [Zero data retention](https://code.claude.com/docs/en/zero-data-retention)（官方，2026-07 / 2026-08 核实）：商用条款下不用你的代码或 prompt 训练模型；消费版开训练留 5 年；ZDR 不含在标准 Enterprise 套餐里，由客户团队按组织开通，且不覆盖 Bedrock / Vertex / Foundry。
-[^2]: [Claude Code: Data Exfiltration with DNS (CVE-2025-55284) — embracethered](https://embracethered.com/blog/posts/2025/claude-code-exfiltration-via-dns-requests/)（社区安全研究）：披露 2025-05-26，修复 2025-06-06（v1.0.4），CVSS 7.1。
-[^3]: [GenAI Code Security Report — Veracode](https://www.veracode.com/blog/genai-code-security-report/)（行业，2025）：45% 的 AI 生成代码引入 OWASP Top 10 类漏洞，Java 场景失败率超 70%，新模型未见改善。
+[^1]: [Claude Code Data usage](https://code.claude.com/docs/en/data-usage) 与 [Zero data retention](https://code.claude.com/docs/en/zero-data-retention)（官方，2026-08-15 核实）：商用条款下不用你的代码或 prompt 训练模型；消费版开训练留 5 年；ZDR 不含在标准 Enterprise 套餐里，由客户团队按组织开通，且不覆盖 Bedrock / Vertex / Foundry。
+[^2]: [Claude Code: Data Exfiltration with DNS (CVE-2025-55284) — embracethered](https://embracethered.com/blog/posts/2025/claude-code-exfiltration-via-dns-requests/) 与 [NVD](https://nvd.nist.gov/vuln/detail/CVE-2025-55284)（社区安全研究 + 官方漏洞库，2026-08-15 核实）：向厂商披露 2025-05-26，修复 2025-06-06（v1.0.4），CVSS 4.0 评分 7.1，CVE 编号于 2025-08-15 公开。研究者建议的修复是把 DNS 类命令移出自动白名单，官方未公布具体修复方式。
+[^3]: [GenAI Code Security Report — Veracode](https://www.veracode.com/blog/genai-code-security-report/)（行业，2025，2026-08-15 复核）：100+ 模型、80 个编码任务，45% 的 AI 生成代码引入 OWASP Top 10 类漏洞，Java 失败率 72%，新模型未见改善。
 [^4]: [Claude Code Security — Claude Code Docs](https://code.claude.com/docs/en/security)（官方，2026-07）：Anthropic 不对任何 MCP server 做安全审计。
 [^5]: [MCP Security Best Practices](https://modelcontextprotocol.io/docs/tutorials/security/security_best_practices)、[OWASP: MCP Tool Poisoning](https://owasp.org/www-community/attacks/MCP_Tool_Poisoning)、[Invariant Labs: MCP Tool Poisoning Attacks](https://invariantlabs.ai/blog/mcp-security-notification-tool-poisoning-attacks) 与 [Claude Code Skills](https://code.claude.com/docs/en/skills)（官方与社区安全研究，个人研究整理于 2026-07）：来自不可信来源的本地 stdio MCP server 可导致任意代码执行与数据外泄；工具响应与工具描述都能夹带隐藏指令，界面展示的信息可能少于模型看到的；Skill 可包含脚本、可在发送给模型前执行 shell 命令替换输出、可通过 `allowed-tools` 预授权工具，项目 skill 在 workspace trust 后生效。
 [^6]: [Post-mortem: unauthorized Cline CLI npm publish](https://cline.ghost.io/post-mortem-unauthorized-cline-cli-npm/)（厂商官方 post-mortem，事件 2026-02-17）：`cline@2.3.0` 由受损的 npm publish token 发布，新增 `postinstall` 全局安装外部包；triage 与 release workflow 共享 Actions cache 属可行链路而非已确认的唯一路径；整改含移除 AI triage workflow、轮换凭据、迁移 npm OIDC provenance。
@@ -388,6 +402,6 @@ AI coding agent 和传统补全式 AI 的根本区别，是它能读整台机器
 
 <sub>难度 高级 · 决策题 + 排错题 · 主线 Claude Code，横向 Cursor / Copilot · 技术护栏人人能自己配，部署选型与组织政策需负责人拍板</sub>
 
-<sub>**时效**：数据政策事实（商用默认不训练、标准留存 30 天、消费版开训练留 5 年、ZDR 不含在标准 Enterprise、本地明文会话记录与 `cleanupPeriodDays`、AES-256/KMS/CMEK、Development Partner Program 在 Bedrock/Vertex 不可用、第三方平台 telemetry 默认关闭）于 2026-07-18 逐项核实；出境与条款相关事实（ZDR 不覆盖三大云、Anthropic 赔偿只覆盖 paid use、Copilot IP 赔偿只给 Business/Enterprise）于 2026-08 核实；MCP / Skills 风险机制、敏感文件清单、陌生仓库入口清单、MCP 四项审计与 Cline 事件复盘，来自个人研究整理，于 2026-07 核实。**已知不确定**：CVE 细节以各研究者原文为准；Cline 事件里「令牌经 Actions cache 泄露」只是 Cline 自述的可行链路，未被确认为唯一路径；managed-settings 示例里的字段名以你所在版本的 settings 文档为准；横向对比里的 Cursor / Copilot 条款为社区口径。**易变**：政策条款随官方更新即失效，签约或合规决策前以官方页面与商业条款为准；permissions 配置键名以你所在版本的文档为准。</sub>
+<sub>**时效**：数据政策事实（商用默认不训练、标准留存 30 天、消费版开训练留 5 年、ZDR 不含在标准 Enterprise、本地明文会话记录与 `cleanupPeriodDays`、AES-256/KMS/CMEK、Development Partner Program 在 Bedrock/Vertex 不可用、第三方平台 telemetry 默认关闭）于 2026-08-15 对照官方 data-usage 页复核；条款相关事实（ZDR 不覆盖三大云、Anthropic 赔偿只覆盖 paid use、Copilot IP 赔偿只给 Business/Enterprise）、CVE-2025-55284 时间线、IDEsaster 数字、Veracode 与 ProjectDiscovery 调研数字、Cline 与 Claudy Day 事故细节、managed-settings 示例字段名，均于 2026-08-15 对照原始出处核实。**已知不确定**：CVE-2025-55284 的具体修复方式官方未公布，「移出自动白名单」是研究者建议，未见官方确证；Cline 事件里「令牌经 Actions cache 泄露」只是 Cline 自述的可行链路，未被确认为唯一路径。**易变**：政策条款随官方更新即失效，签约或合规决策前以官方页面与商业条款为准；permissions / sandbox 配置键名以你所在版本的文档为准。</sub>
 
 > 本篇个人实践（L4）：`[待补：BOSS 的实战经验/踩坑——部署模式实际怎么选、密钥外泄有没有踩过坑、managed settings 红线清单长啥样]`

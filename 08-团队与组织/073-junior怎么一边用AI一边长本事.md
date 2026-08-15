@@ -31,7 +31,7 @@ flowchart TD
 
 这是全篇唯一有实测支撑的分水岭。同一批人里，拿 AI 追问概念、要解释、自己动手实现的得分 65% 以上；把整段活甩给 AI 生成和 debug 的跌破 40%[^1]。左列是后者的说法，右列是前者的。
 
-| 你常说的（反成长，<40 分） | 换成这句（促成长，>65 分） | 说完怎么自检 |
+| 你常说的（反成长，<40%） | 换成这句（促成长，>65%） | 说完怎么自检 |
 |---|---|---|
 | 「帮我把这个功能写完」 | 「先解释这里为什么用 async 而不是线程池，讲完别写代码，我自己写第一版，你再挑错」 | 合上 AI 窗口，能不能口述这段代码的执行顺序（谁先跑、在哪挂起、谁唤醒） |
 | 「报错了，你直接改」 | 「别改。告诉我这个报错的根因假设有哪几种、分别怎么验证，我来定位」 | 能不能自己说出「如果是原因 A，我该看哪个日志、加哪句打印」 |
@@ -173,7 +173,7 @@ Fastly 调查了 791 名开发者：约三分之一的 senior（10 年以上经�
 
 ### 岗位这一层：入门岗在缩，但只留 senior 的结构撑不住
 
-到 2025-07，22–25 岁软件开发者的就业相比 2022 年末的峰值降了约 20%，入门级技术招聘在 2024 年同比降了 25%[^5]。
+到 2025-07，22–25 岁软件开发者的就业相比 2022 年末的峰值降了约 20%[^5]；大厂新毕业生招聘 2024 年比 2023 年少了 25%[^6]。
 
 短期看，senior + AI 能吃掉过去交给 junior 的活，砍掉入门岗省钱很诱人。长期看，senior 只有一个来源——从 junior 长出来。停招 junior，就是把未来几年的 senior 供给一起关掉，而现有 senior 会老去、会跳槽。这不是道德问题，是补给问题。社区把成长路径重构成三段：先不用 AI 直到建立起直觉，再有意识地用 AI 去观察它在哪里失灵，最后成为 AI-native expert。难点也在这：AI 是超个性化的家教，同时也是逃避动手练习的、几乎不可抗拒的诱惑。
 
@@ -181,7 +181,7 @@ Fastly 调查了 791 名开发者：约三分之一的 senior（10 年以上经�
 
 - ❌ **看产出涨就断定「我在成长」。**提效和成长是两根轴，产出涨的同时掌握度可能在掉。用延迟测验测，别用感觉测。
 - ❌ **信自己「感觉更快了」的自评。**连资深开发者都被测出「自评 +20%、实则 −19%」。
-- ❌ **整段甩给 AI 生成加 debug，或者为省时间取消所有自己磕的机会。**这是跌破 40 分的用法；该甩给 AI 的不是理解，是重复劳动。
+- ❌ **整段甩给 AI 生成加 debug，或者为省时间取消所有自己磕的机会。**这是跌破 40% 的用法；该甩给 AI 的不是理解，是重复劳动。
 - ❌ **团队「AI 能顶活，停招 junior 省钱」。**senior 只有一个来源，就是长大的 junior，停招等于关掉未来几年的供给。
 - ❌ **资深判断力只留在 senior 脑子里、靠口头带。**senior 一忙 junior 就裸奔，要用 subagent、`CLAUDE.md`、rules 把标准固化下来。
 
@@ -222,21 +222,24 @@ Fastly 调查了 791 名开发者：约三分之一的 senior（10 年以上经�
 - [How generative AI affects highly skilled workers — MIT Sloan](https://mitsloan.mit.edu/ideas-made-to-matter/how-generative-ai-affects-highly-skilled-workers) —— 支撑「junior +27~39%、senior +8~13%」的产出增益对比（研究，2024-11）
 - [Measuring the Impact of Early-2025 AI on Experienced OS Developers — METR](https://metr.org/blog/2025-07-10-early-2025-ai-experienced-os-dev-study/) —— 支撑「实际慢 19%、自评快 20%」这一感知落差（研究，2025-07）
 - [Senior Developers Ship 2.5x More AI Code — Fastly](https://www.fastly.com/blog/senior-developers-ship-more-ai-code) —— 支撑「senior 敢放进生产的 AI 代码是 junior 的 2.5 倍，差在审查判断力」（调查，791 人，2025-07）
-- [AI vs Gen Z — Stack Overflow Blog](https://stackoverflow.blog/2025/12/26/ai-vs-gen-z/) —— 支撑「22–25 岁就业降约 20%、入门招聘降 25%」与「不招 junior 就没有 senior」（社区转引 Stanford 数字经济研究，2025-12）
-- [Create custom subagents — Claude Code Docs](https://code.claude.com/docs/en/sub-agents) —— 支撑第五步的文件位置、frontmatter 字段、`@agent-<name>` 调用、新建目录需重启（官方，2026-08 核对）
+- [Canaries in the Coal Mine? — Stanford Digital Economy Lab](https://digitaleconomy.stanford.edu/publication/canaries-in-the-coal-mine-six-facts-about-the-recent-employment-effects-of-artificial-intelligence/) —— 支撑「22–25 岁软件开发者就业较 2022 年末峰值降约 20%」（研究，2025-08 首发、多次修订）
+- [SignalFire State of Tech Talent Report 2025](https://www.signalfire.com/blog/signalfire-state-of-talent-report-2025) —— 支撑「大厂新毕业生招聘 2024 年降 25%」（行业报告，2025-05）
+- [AI vs Gen Z — Stack Overflow Blog](https://stackoverflow.blog/2025/12/26/ai-vs-gen-z/) —— 支撑「不招 junior 就没有 senior」的论述（社区，2025-12）
+- [Create custom subagents — Claude Code Docs](https://code.claude.com/docs/en/sub-agents) —— 支撑第五步的文件位置、frontmatter 字段、`@agent-<name>` 调用、新建目录需重启（官方，2026-08-15 核对）
 - [AI is making junior devs useless — HN 47206663](https://news.ycombinator.com/item?id=47206663) —— 支撑「三段成长路径」与「AI 既是家教也是逃避练习的诱惑」（社区，2026-03）
 - [The Skill Atrophy Trap — TianPan.co](https://tianpan.co/blog/2026-04-19-skill-atrophy-ai-augmented-engineering) —— 支撑「隐形腐蚀无内部信号可纠偏」与欠账清单（skill-debt tracking）这个做法（社区，2026-04）
 
-[^1]: [How AI assistance impacts the formation of coding skills — Anthropic](https://www.anthropic.com/research/AI-assistance-coding-skills)（官方研究，Shen & Tamkin，arXiv:2601.20245，2026-01）：52 人随机对照实验，AI 组测验平均 50%、手写组 67%；组内分化为追问型 >65%、整段委托型 <40%；并建议保留「痛苦地卡住」的过程。
+[^1]: [How AI assistance impacts the formation of coding skills — Anthropic](https://www.anthropic.com/research/AI-assistance-coding-skills)（官方研究，Shen & Tamkin，arXiv:2601.20245，2026-01）：52 名工程师（原文描述为「多为 junior」，至少一年每周写 Python 的经验）的随机对照实验，AI 组测验平均 50%、手写组 67%（d=0.738，p=0.01）；AI 组平均只快约 2 分钟，原文明确说该速度差异未达统计显著；组内分化为追问型 >65%、整段委托型 <40%；并称「认知上的努力乃至痛苦地卡住，很可能是培养精通的关键」。
 [^2]: [How generative AI affects highly skilled workers — MIT Sloan](https://mitsloan.mit.edu/ideas-made-to-matter/how-generative-ai-affects-highly-skilled-workers)（研究，Dylan Walsh，2024-11）：经验少、入职短的开发者更常用工具且产出增幅更大，junior +27~39%、senior +8~13%。
 [^3]: [Measuring the Impact of Early-2025 AI on Experienced OS Developers — METR](https://metr.org/blog/2025-07-10-early-2025-ai-experienced-os-dev-study/)（研究，2025-07）：16 名资深开发者用 AI 后实际慢 19%，自评快 20%。
 [^4]: [Senior Developers Ship 2.5x More AI Code — Fastly](https://www.fastly.com/blog/senior-developers-ship-more-ai-code)（调查，2025-07）：791 人；senior 更能快速识别 AI 代码在哪里不正确、不安全或不适合当前问题。
-[^5]: [AI vs Gen Z — Stack Overflow Blog](https://stackoverflow.blog/2025/12/26/ai-vs-gen-z/)（社区，Eira May，2025-12，数字转引 Stanford 数字经济研究，单链路）：22–25 岁软件开发者就业较 2022 年末峰值降约 20%，入门级技术招聘 2024 年同比降 25%。
+[^5]: [Canaries in the Coal Mine? — Stanford Digital Economy Lab](https://digitaleconomy.stanford.edu/publication/canaries-in-the-coal-mine-six-facts-about-the-recent-employment-effects-of-artificial-intelligence/)（研究，Brynjolfsson / Chandar / Chen，基于 ADP 薪酬数据，2025-08 首发、多次修订）：22–25 岁软件开发者就业较 2022 年末峰值降约 20%；[Stack Overflow Blog 的转述](https://stackoverflow.blog/2025/12/26/ai-vs-gen-z/)（社区，2025-12）与此一致。
+[^6]: [SignalFire State of Tech Talent Report 2025](https://www.signalfire.com/blog/signalfire-state-of-talent-report-2025)（行业报告，基于 LinkedIn 数据，2025-05）：大厂（市值前 15 科技公司）新毕业生招聘 2024 年较 2023 年降 25%。范围是大厂新毕业生，不是全行业入门岗。
 
 ---
 
 <sub>难度 高级 · 场景题 + 决策题 · 主线 Claude Code，横向 Cursor / Copilot · 个人和带人者都能用，第五步起偏带人者</sub>
 
-<sub>**时效**：Anthropic RCT 与 MIT Sloan 研究于 2026-08-03 复核，均无更新版或后续发表；METR / Fastly / Stack Overflow 数据链接当时全部存活；subagent 的文件位置与 frontmatter 字段按官方 2026-08 版文档核对。**已知不确定**：22–25 岁就业降 20% 的数字由 Stack Overflow 转引 Stanford 研究，单链路；HN 与 TianPan 两条为社区观点，非实证。**易变**：各研究测的时代背景不同（MIT 是补全时代 2024，Fastly / METR 是 agentic 时代 2025），换代后数字会变；subagent 的 frontmatter 字段随版本调整，配置前回查 sub-agents 文档。</sub>
+<sub>**时效**：2026-08-15 复核：Anthropic RCT（含参与者构成「多为 junior」、速度差异未达统计显著两点）、MIT Sloan 数字、Fastly 样本量与两组比例、Stanford 原始研究的 20% 数字均对到原文；subagent 的 frontmatter 五项断言（model 可选值含 fable / 省略 tools 继承全部 / name 不能含冒号 / `@agent-<name>` 手写调用 / 新建目录需重启）逐条按官方 sub-agents 文档当日版本核对。**已知不确定**：25% 一项出自 SignalFire 行业报告（LinkedIn 数据，范围为大厂新毕业生），非官方统计；Stanford 研究多次修订，最新版口径为「AI 高暴露职业年轻人就业差距约 19%」，数字随修订漂移；HN 与 TianPan 两条为社区观点，非实证。**易变**：各研究测的时代背景不同（MIT 是补全时代 2024，Fastly / METR 是 agentic 时代 2025），换代后数字会变；subagent 的 frontmatter 字段随版本调整，配置前回查 sub-agents 文档。</sub>
 
 > 本篇个人实践（L4）：`[待补：BOSS 带 junior 的真实组合 / 哪条红线最有效 / 保护区怎么留 / 有没有养出永久新手的教训]`

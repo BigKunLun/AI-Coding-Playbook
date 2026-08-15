@@ -48,7 +48,7 @@ flowchart TD
 
 | 层 | 要具备的 | 常见缺口 |
 |---|---|---|
-| **验证（地基）** | 机器可判的完成标准（可执行断言 / BDD）；分钟级 CI；单测 / 集成 / E2E / 性能 / 安全分层各管各的风险 | 「验证者悖论」——测试也是 AI 写的。用 mutation testing（故意改坏代码看测试能不能抓到）反向校验测试质量。CI 要 30 分钟，L3 级的 agent 自主闭环就不成立 |
+| **验证（地基）** | 机器可判的完成标准（可执行断言 / BDD）；分钟级 CI；单测 / 集成 / E2E / 性能 / 安全分层各管各的风险 | 「验证者悖论」——测试也是 AI 写的。用 mutation testing（故意改坏代码看测试能不能抓到）反向校验测试质量。CI 一旦要跑 30 分钟，agent 无人值守的自主闭环就不成立 |
 | **信任（中层）** | 分级信任而非全信/全不信（样板代码可以高、核心业务中等、安全与资金最低）；AI 改了什么为什么必须可见；团队共享的失败模式库（长上下文遗忘、幻觉 API、过时库版本） | 责任归属没写死，出事时「AI 写的」成了挡箭牌。正确口径是 AI 产出 = 提交者负责 |
 | **编排（顶层）** | 任务粒度切到「一个 agent 能独立完成且可独立验证」；agent 间上下文怎么传；人嵌在关键 gate 上而不是全程监工；产出可回滚可断点续 | 跳过验证直接堆 agent。这是最常见的翻车方式 |
 
@@ -69,7 +69,7 @@ flowchart TD
 | **agentic 硬限**：不得部署生产、改基础设施、改密钥、改访问控制、跑破坏性命令，除非有显式人批准加审计日志 | 自主 agent 的高危动作不可回滚 | 权限 deny + approval gate（managed policy） |
 | **人对产出负责**：提交或批准 AI 辅助工作的人对结果负责，不得合并自己解释不了的 AI 代码 | 责任不能转嫁给 AI | PR 模板 + review 纪律，机制见 [#040](../05-质量保证/040-怎么验证AI代码是真的对.md) |
 | **上游产出同样适用**：AI 写的需求、技术方案、排期，提出者要能自己解释每一条并标明哪部分是 AI 生成；接口和数据结构须与现有系统对齐后才能进排期 | 幻觉方案会一路传到交付端，下游只能被动接单 | 方案模板加「AI 参与标注」和「已核对的接口清单」两栏，技术评审是这条的门禁 |
-| **工具/模型白名单**：批准的工具（企业档 Cursor/Copilot、带内部端点的 Claude Code）对禁止的工具（个人 ChatGPT、浏览器插件、个人邮箱的免费 API key） | 影子 AI 等于影子风险 | 采购或网关层强制 + managed policy |
+| **工具/模型白名单**：列出批准的工具（企业档 Cursor/Copilot、带内部端点的 Claude Code），并点名禁止的工具（个人 ChatGPT、浏览器插件、个人邮箱的免费 API key） | 影子 AI 等于影子风险 | 采购或网关层强制 + managed policy |
 
 **该自由（should / 开发者判断）**
 
@@ -156,9 +156,9 @@ Augment 把这个张力说得直白：代码库模式一致时，AI 助手是力
 
 有了规范也可能失败，通常有两种失败方式。
 
-第一种是空话，比如「负责任地使用 AI」——含糊的政策没法执行，只会被绕过。第二种是禁令式大部头：规则条数越多、豁免流程越慢，绕过率就越高；工程师只会采纳那些让安全路径比绕路更省事的规则[^2]。
+第一种是空话，比如「负责任地使用 AI」——含糊的政策没法执行，只会被绕过。第二种是禁令式大部头：规则条数越多、豁免流程越慢，绕过率就越高；工程师只会采纳那些让安全路径比绕路更省事的规则[^2][^6]。
 
-所以规范的设计目标不是覆盖所有情况，而是让该强制的少而硬、其余留自由。2026 年的主流治理范式叫 bounded autonomy（有边界的自主），包含三件事：给 agent 明确的操作边界、对高风险决策强制升级到人来批准、保留完整审计轨迹。翻译成一句话：agent 能自主做什么、什么必须人批准，这条线要画出来，线以内放手、线以外强制。
+所以规范的设计目标不是覆盖所有情况，而是让该强制的少而硬、其余留自由。IBM 一篇综述把这类做法归纳为 bounded autonomy（有边界的自主），包含三件事：给 agent 明确的操作边界、对高风险决策强制升级到人来批准、保留完整审计轨迹；同名提法在学术论文和厂商治理框架里也反复出现，但还谈不上行业统一标准[^7]。翻译成一句话：agent 能自主做什么、什么必须人批准，这条线要画出来，线以内放手、线以外强制。
 
 ### 规范只管写代码的人，上游会漏掉
 
@@ -180,8 +180,8 @@ Augment 把这个张力说得直白：代码库模式一致时，AI 助手是力
 | 工具 | 「强制」机制 | 差异 |
 |------|-----------|------|
 | **Claude Code** | managed-settings.json（MDM 或 server-managed）加 `allowManagedPermissionRulesOnly` 硬锁，deny 跨层不可翻案 | 三层设置天然对应强制/默认/自由，IT 可部署不可覆盖层 |
-| **Cursor** | Team/Enterprise 的 admin 规则加 Cursor Rules 全员分发 | 规则以引导 agent 风格为主，硬权限边界依赖底层模型厂商条款 |
-| **GitHub Copilot** | 企业策略（组织级开关、内容排除、代码引用过滤） | 偏「哪些能用、哪些内容不喂」，代码库风格一致性靠外部 linter |
+| **Cursor** | admin 在云端 dashboard 分发 Team Rules（可设为推荐或必须）；Enterprise 档另有审计日志、sandbox、hooks、MDM 策略 | 规则分发 Team 档即有；审计与硬管控集中在 Enterprise 档 |
+| **GitHub Copilot** | 组织级策略（功能开关、公共代码匹配过滤）加内容排除 | 偏「哪些能用、哪些内容不喂」，代码库风格一致性靠外部 linter；内容排除在 agent 模式和 CLI 下不生效 |
 
 共性一句话：团队一致性这类软约束，靠共享规则文件（CLAUDE.md / Cursor Rules）加 linter；安全和高危这类硬约束，靠 IT 可部署、不可覆盖的 managed policy。两类别混。
 
@@ -209,18 +209,24 @@ Augment 把这个张力说得直白：代码库模式一致时，AI 助手是力
 - [V2EX 1229246: 产品经理开始用 AI 做「技术方案」了](https://www.v2ex.com/t/1229246) —— 支撑「为什么」第三节的上游案例，以及被 mandate 一方的「谁定义谁负责」「反向挑刺再打回」两条做法（社区，2025-07，2026-08-03 实访核实）
 - [V2EX 1221898: IT 团队没人愿意动脑子了](https://v2ex.com/t/1221898) —— 支撑「全链路依赖 AI、没人认真读过那个规划」与「脑子可以外包，责任不能外包」（社区，2026-08-03 实访核实）
 - 《AI 原生团队：成熟度光谱与转型诊断框架》—— 支撑第零交付物的验证 / 信任 / 编排三层依赖、症状对层的映射表，以及三层各自的构成要件（个人研究，2026-07，未公开）
-- [IBM: Standardize AI Code Generation Across Your Development Team](https://www.ibm.com/think/insights/standardize-ai-code-generation-across-your-development-team) —— 支撑「无标准时每个 agent 各走各的（Jest vs Mocha）」与 bounded autonomy 三要件（从业者综述，2026；页面 403 反爬，内容经搜索返回、未逐字二次核验）
+- [IBM: Standardize AI Code Generation Across Your Development Team](https://www.ibm.com/think/insights/standardize-ai-code-generation-across-your-development-team) —— 支撑「无标准时每个 agent 各走各的（Jest vs Mocha）」与 bounded autonomy 三要件（从业者综述，2026；页面 403 反爬，2026-08-15 再试仍 403，内容经搜索摘要交叉印证、未逐字二次核验）
+- [arXiv: Bounded Autonomy for Enterprise AI — Typed Action Contracts and Consumer-Side Execution](https://arxiv.org/abs/2604.14723) —— 佐证 bounded autonomy 是多来源提法而非 IBM 独有：操作边界（typed action contracts、权限感知的能力暴露）与人类批准均在其定义内（学术论文，2026-04，2026-08-15 核实）
+- [Cursor: Introducing Cursor for Enterprise](https://cursor.com/blog/enterprise) / [Cursor Docs: Members, Roles, and Seat Types](https://cursor.com/docs/account/teams/members) —— 支撑对比表 Cursor 行：admin 云端分发 Team Rules（可设推荐或必须）、Enterprise 档的审计日志 / sandbox / hooks / MDM 策略（官方，2026-08-15 核实）
+- [GitHub Docs: Managing policies for Copilot in your organization](https://docs.github.com/enterprise-cloud@latest/copilot/managing-copilot/managing-github-copilot-in-your-organization/setting-policies-for-copilot-in-your-organization/managing-policies-for-copilot-in-your-organization) / [GitHub Docs: Content exclusion for GitHub Copilot](https://docs.github.com/en/enterprise-cloud@latest/copilot/concepts/context/content-exclusion) —— 支撑对比表 Copilot 行：组织级策略开关、公共代码匹配过滤、内容排除及其在 agent 模式 / CLI 下的限制（官方，2026-08-15 核实）
+- [UpGuard: The State of Shadow AI](https://www.upguard.com/resources/the-state-of-shadow-ai) —— 佐证「禁而不止、员工会绕过封禁」的行为事实（厂商调研，2025-11，2026-08-15 核实）
 
 [^1]: [CC Docs: Settings](https://code.claude.com/docs/en/settings)（官方，2026）：设置优先级 Managed > 命令行参数 > Local > Project > User，Managed 不能被任何东西覆盖；`allowManagedPermissionRulesOnly` 阻止 user/project 定义 allow、ask、deny 规则；`allowManagedHooksOnly` 只加载 managed 及 managed 强制启用插件的 hooks。
 [^2]: [Metacto: AI Usage Policy Template for Developers 2026](https://www.metacto.com/blogs/creating-effective-ai-usage-policies-for-development-teams)（从业者指南，2026-07）：Confluence 里放个 PDF 改变不了行为；伪装成治理的禁令会失败，工程师只采纳让安全路径比绕路更省事的规则；同一豁免出现三次即应修改规范；披露要求与真实风险成比例。
 [^3]: [Augment Code: Enterprise Coding Standards — 12 Rules for AI-Ready Teams](https://www.augmentcode.com/guides/enterprise-coding-standards-12-rules-for-ai-ready-teams)（从业者指南，2025-09 发布 / 2026-06 更新）：模式一致时 AI 助手是 force multipliers，不一致时是 chaos amplifiers；命名风格选哪个不重要，全组一致才重要。
 [^4]: [Stack Overflow Blog: Building shared coding guidelines for AI (and people too)](https://stackoverflow.blog/2026/03/26/coding-guidelines-for-ai-agents-and-people-too/)（社区，2026-03）：第一版规范不会完美，失败就是反馈；标准文件应可被全员编辑评论；不要因此放弃 linter、formatter 等确定性执行器。
 [^5]: 个人研究（2026-07，AI 原生团队成熟度与转型诊断框架）：验证 / 信任 / 编排三层自下而上依赖，验证是地基；症状对层的映射（不敢合并 = 验证层、review 时自己重写 = 信任层、多 agent 就乱 = 编排层、效率没提升多半仍卡验证层）来自团队一线观察，非公开研究结论。
+[^6]: [UpGuard: The State of Shadow AI](https://www.upguard.com/resources/the-state-of-shadow-ai)（厂商调研，2025-11，2026-08-15 核实）：约八成受访员工在用未经批准的 AI 工具，45% 的员工会想办法绕过被封禁的应用。注意这只佐证「禁令挡不住绕过」的行为事实；「条数越多、豁免越慢，绕过率越高」这个因果表述出自 Metacto 从业者指南，未见实证研究直接验证。
+[^7]: bounded autonomy（有边界的自主）见于多个独立来源：IBM 综述（页面 403，内容经搜索摘要印证、未逐字二次核验）、[arXiv: Bounded Autonomy for Enterprise AI](https://arxiv.org/abs/2604.14723)（学术，2026-04）等；「操作边界 + 高风险升级人批 + 完整审计轨迹」这组三要件的归纳出自 IBM 那篇，其中前两件与 arXiv 论文的定义吻合，整组表述未见第二来源逐字确证。
 
 ---
 
 <sub>难度 中级 · 决策题 + 配置题 + 流程题 · 主线 Claude Code，横向 Cursor / Copilot · 主要面向团队负责人与 Tech Lead，不是决策者可直接看「被 mandate 的那一方」折叠块</sub>
 
-<sub>**时效**：官方 settings 引用（五层优先级、`allowManagedPermissionRulesOnly` / `allowManagedHooksOnly`）于 2026-07-18 巡检复核并与现行文档一致；两条 V2EX 社区素材于 2026-08-03 实访核实；外链当时全部存活。第零交付物的三层诊断表于 2026-08-04 从一手研究笔记录入。**已知不确定**：验证 / 信任 / 编排三层框架与症状映射出自个人一手研究与团队一线观察，不是公开研究结论，别当行业标准引用；IBM 那篇因 403 反爬未能逐字二次核验，「bounded autonomy」与「Jest vs Mocha」两处依赖它；GoGloby、Metacto、Augment 均为厂商或从业者指南，非实证研究。**易变**：managed settings 的具体键名与 server-managed settings 的可用版本随官方更新，配置前以 settings 文档为准；「强制/自由怎么划」的框架不依赖具体版本。</sub>
+<sub>**时效**：官方 settings 引用（五层优先级、`allowManagedPermissionRulesOnly` / `allowManagedHooksOnly`）于 2026-07-18 巡检复核并与现行文档一致；Cursor / Copilot 对比表于 2026-08-15 对照两家官方文档核实；bounded autonomy 的多来源交叉核实与影子 AI 调研引用同日完成；两条 V2EX 社区素材于 2026-08-03 实访核实。第零交付物的三层诊断表于 2026-08-04 从一手研究笔记录入。**已知不确定**：验证 / 信任 / 编排三层框架与症状映射出自个人一手研究与团队一线观察，不是公开研究结论，别当行业标准引用；IBM 那篇 2026-08-15 再试仍 403，未能逐字二次核验，「bounded autonomy 三要件」与「Jest vs Mocha」两处的原文表述依赖搜索摘要印证；「规则越多绕过率越高」的因果表述仅有从业者指南支撑，未见实证研究确证；GoGloby、Metacto、Augment、UpGuard 均为厂商或从业者材料，非同行评审研究。**易变**：managed settings 的具体键名与 server-managed settings 的可用版本随官方更新，配置前以 settings 文档为准；Cursor / Copilot 的企业档功能与档位划分随两家产品更新快，配置前以官方文档为准；「强制/自由怎么划」的框架不依赖具体版本。</sub>
 
 > 本篇个人实践（L4）：`[待补：BOSS 团队的强制清单实际几条 / 哪条最先落 managed policy / 哪条从强制降回自由 / 豁免流程踩过的坑]`

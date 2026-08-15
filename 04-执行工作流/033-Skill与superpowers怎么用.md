@@ -48,6 +48,9 @@ my-skill/
 └── scripts/validate.sh # 可执行脚本（执行，不读进上下文）
 ```
 
+<details>
+<summary>四个存放位置与同名时的优先级</summary>
+
 | 位置 | 路径 | 作用于 |
 |------|------|--------|
 | 个人 | `~/.claude/skills/<name>/SKILL.md` | 你的所有项目 |
@@ -55,7 +58,9 @@ my-skill/
 | 插件 | `<plugin>/skills/<name>/SKILL.md` | 启用该插件处 |
 | 企业 | managed settings | 组织全员 |
 
-同名时优先级：企业 > 个人 > 项目 > 内置。插件 skill 用 `plugin-name:skill-name` 命名空间，不会冲突。
+同名时优先级：企业 > 个人 > 项目 > 内置。注意这与 settings 等其他配置通行的「企业 > 项目 > 个人」次序不同，是官方文档明写的 skill 特例[^7]。插件 skill 用 `plugin-name:skill-name` 命名空间，不会冲突。
+
+</details>
 
 ### 第三步：写 frontmatter —— description 是成败关键
 
@@ -144,11 +149,12 @@ paths: apps/web/**/*.{ts,tsx}
 1. **触发率**：开一个全新会话，用你真实会说出口的那句话（不要照抄 description）提问，看它加不加载。不加载就改 description。
 2. **效果**：触发之后产出对不对。不对就改正文。
 
-官方推荐用 `skill-creator` 插件做 A/B 基线对比：在全新会话里分别测「开 skill」和「关 skill」。superpowers 更极端，把写 skill 当 TDD 做 —— 先跑基线看 agent 没有 skill 时怎么失败（RED），再写 skill 让它变对（GREEN），最后堵漏洞（REFACTOR）。
+官方给的基线测法是：在全新会话里分别跑「开 skill」和「关 skill」对比结果，并推荐用 `skill-creator` 插件把这套评估自动化，含两个版本 skill 的盲测 A/B[^8]。superpowers 更极端，把写 skill 当 TDD 做 —— 先跑基线看 agent 没有 skill 时怎么失败（RED），再写 skill 让它变对（GREEN），最后堵漏洞（REFACTOR）。
 
 ### 排错：不触发 / 触发太频繁
 
-不触发时依次检查：
+<details>
+<summary>不触发时的 6 步检查清单（触发太频繁的处理在末尾）</summary>
 
 1. description 里有没有用户会自然说出口的关键词。
 2. 问 `What skills are available?`，确认它出现在列表里。
@@ -158,6 +164,8 @@ paths: apps/web/**/*.{ts,tsx}
 6. description 预算溢出：装太多 skill 时描述会被截断、丢掉关键词。先跑 `/context`，看 skill 分项里有没有你这个 skill —— **不在列表里就是被预算挤出去了，改多少遍 description 都没用**。再跑 `/doctor` 看哪些被截断，然后用 `skillListingBudgetFraction` 调高预算，或把低优先级 skill 设成 `"name-only"`。
 
 触发太频繁时：description 写得更具体，或加 `disable-model-invocation: true` 改成纯手动。
+
+</details>
 
 <details>
 <summary>5 分钟写一个「总结改动」skill（官方入门示例）</summary>
@@ -229,11 +237,16 @@ auto-compaction 发生时，被调用过的 skill 会被重新挂载：每个保
 
 skill 不是「又一种 prompt」，而是把人类专家的流程化经验打包成 agent 能自己发现的资源。核心机制叫 progressive disclosure（渐进披露）—— 像一本先给目录、再到章节、最后是附录的手册，让 Claude 只在需要时加载信息，因此一个 skill 能塞进的内容量几乎没有上限[^1]。
 
+<details>
+<summary>三层加载的时机与大小</summary>
+
 | 层级 | 何时加载 | 大小 |
 |------|---------|------|
 | **第 1 层**：`name` + `description` frontmatter | 启动时预加载进每个会话的 system prompt | 官方给约 100 tokens / skill；官方 skill 实测中位约 80，最大 235 |
 | **第 2 层**：`SKILL.md` 正文 | Claude 判断「相关」时才读进来 | 通常 <500 行（<5k tokens） |
 | **第 3 层**：附属文件（reference.md / scripts/） | 正文指向它、且当前任务真需要时才读 | 无上限 |
+
+</details>
 
 这也解释了 skill 和 CLAUDE.md 的根本区别：CLAUDE.md 是常驻税，每一轮对话都占 token；skill 是按需调用，不用就不花 token[^2]。
 
@@ -242,11 +255,14 @@ skill 不是「又一种 prompt」，而是把人类专家的流程化经验打�
 所以答案不是「skill 越少越好」，而是：**几十个 skill 完全不用心疼，真正会咬人的是 description 写太长和装了一堆常驻 MCP。** 两个能直接照做的动作：
 
 - description 控制在两三行 —— 它是唯一进常驻预算的部分，写长了不只多花 token，还会挤掉别的 skill 的描述。
-- 常驻成本超预算时，先砍 MCP 再砍 skill。判据见 [006 篇](../01-心智与工具/006-MCP装哪些不装哪些.md)。注意新版 Claude Code 默认开 tool search，MCP schema 会延迟加载，实际占用可能远低于 5 万，先用 `/context all` 量了再动手。
+- 常驻成本超预算时，先砍 MCP 再砍 skill。判据见 [006 篇](../01-心智与工具/006-MCP装哪些不装哪些.md)。注意 Claude Code 自 v2.1.7 起默认开启 MCP tool search 自动模式：MCP 工具描述超过上下文窗口 10% 时会自动延迟加载[^9]，实际占用可能远低于 5 万，先用 `/context` 量了再动手。
 
 ### 四种机制各管一类问题
 
 官方的一句话区分：MCP 负责把 Claude 连到数据上，skill 负责教 Claude 拿到数据后该做什么；而且 skill 是主动的，Claude 自己知道何时该用它。
+
+<details>
+<summary>五种机制对照：CLAUDE.md / Skill / Command / MCP / SubAgent</summary>
 
 | 机制 | 本质 | 触发方式 | 适合 | 不适合 |
 |------|------|---------|------|--------|
@@ -255,6 +271,8 @@ skill 不是「又一种 prompt」，而是把人类专家的流程化经验打�
 | **Slash Command** | prompt 模板 | 只能你手动 `/name` | 你想完全掌控触发时机的动作（已并入 skill 体系） | 需要自动触发的场景 |
 | **MCP** | 外部数据/工具连接器 | 始终可用 | 连数据库、Slack、GitHub、内部 API | 教 Claude 怎么用这些数据（那是 skill 的活） |
 | **SubAgent** | 独立上下文窗口的专精 agent | 委派 | 隔离上下文、对抗式 review（见 [032 篇](./032-SubAgent并行开几个.md)） | 跨会话复用的专长（那该是 skill） |
+
+</details>
 
 一个重要演进：Claude Code 已经把 custom commands 并入 skill 体系。放在 `.claude/commands/deploy.md` 的命令文件和放在 `.claude/skills/deploy/SKILL.md` 的 skill，都会创建出 `/deploy`，用法完全一样。skill 是 command 的超集，多出三个能力：目录里能放附属文件、能用 frontmatter 控制谁能触发、能让 Claude 自动加载。**所以新项目一律用 skill，别再新建 `.claude/commands/` 目录**（旧文件仍兼容）。
 
@@ -319,7 +337,8 @@ skill 不是「又一种 prompt」，而是把人类专家的流程化经验打�
 
 **参考资料**
 
-- [Extend Claude with skills — Claude Code Docs](https://code.claude.com/docs/en/skills) —— 支撑 skill 创建、frontmatter 全字段、触发控制、动态上下文注入、排错清单、内容生命周期与 compact 重挂载预算（官方，2026-06）
+- [Extend Claude with skills — Claude Code Docs](https://code.claude.com/docs/en/skills) —— 支撑 skill 创建、frontmatter 全字段、触发控制、同名优先级、动态上下文注入、排错清单、skill-creator 评估流程、内容生命周期与 compact 重挂载预算（官方，2026-08-15 核实）
+- [CHANGELOG — anthropics/claude-code](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md) —— 支撑 MCP tool search 自 v2.1.7 起默认开启、10% 阈值自动延迟加载（官方，2026-01）
 - [Skill authoring best practices — Claude API Docs](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices) —— 支撑「Concise is key」、正文 500 行上限、引用只深一层、description 写法与命名规范、先建评估（官方，2026）
 - [Equipping agents for the real world with Agent Skills — Anthropic](https://www.anthropic.com/engineering/equipping-agents-for-the-real-world-with-agent-skills) —— 支撑渐进披露三层设计哲学与开放标准化（官方，2025-10，2025-12 更新）
 - [Skills explained — Claude blog](https://claude.com/blog/skills-explained) —— 支撑三层 token 预算数字（~100 / <5k）与 skill vs MCP vs subagent 的边界厘清（官方，2026-03）
@@ -339,11 +358,14 @@ skill 不是「又一种 prompt」，而是把人类专家的流程化经验打�
 [^4]: [writing-skills SKILL.md — obra/superpowers](https://github.com/obra/superpowers/blob/main/skills/writing-skills/SKILL.md)（社区/开源，2025-2026）：实测发现 agent 会把 description 里的流程摘要当捷径，直接跳过读正文。
 [^5]: [Extend Claude with skills — Claude Code Docs](https://code.claude.com/docs/en/skills)（官方，2026-06）：auto-compaction 时被调用过的 skill 重新挂载，每个保留前 5000 tokens、合计预算 25000 tokens，从最近调用的开始填。
 [^6]: 《Agent Skills 开放标准》读书笔记（个人研究，2026-03-26）：17 个官方 skill 发现层中位约 80 tokens（55–235），100 个约 1 万 tokens；一个 GitHub MCP server 暴露 90+ 工具、JSON schema 超 5 万 tokens。两组数字笔记标注引自 Anthropic 工程博客，本篇未逐字回查原文，按社区/笔记转述采用，量级与官方「约 100 tokens / skill」一致。
+[^7]: [Extend Claude with skills — Claude Code Docs](https://code.claude.com/docs/en/skills)（官方，2026-08-15 核实）：原文明写 "enterprise overrides personal, and personal overrides project"，且任一层级的 skill 覆盖同名内置（bundled）skill——skill 的个人层压过项目层，与 settings 的次序相反，是文档明确的特例。
+[^8]: [Extend Claude with skills — Claude Code Docs](https://code.claude.com/docs/en/skills)（官方，2026-08-15 核实）：Run evals with skill-creator 一节，基线对比是在全新会话里分别以「有 skill / 禁用 skill」跑同一批真实 prompt；`skill-creator` 插件（官方 marketplace）把这个循环自动化，含两版 skill 的盲测 A/B。
+[^9]: [CHANGELOG v2.1.7 — anthropics/claude-code](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md)（官方，2026-01，2026-08-15 核实）：Enabled MCP tool search auto mode by default for all users——MCP 工具描述超过上下文窗口 10% 时自动延迟加载，改由 MCPSearch 工具按需发现。
 
 ---
 
 <sub>难度 高级 · 配置题 · 主线 Claude Code，横向 Cursor / Copilot</sub>
 
-<sub>**时效**：机制数字（metadata 约 100 tokens、正文 <500 行、`description` 字段上限 1024 字符、`description` + `when_to_use` 合并文本 1536 字符截断、compact 重挂载每技能 5000 / 合计 25000 tokens）与 frontmatter 字段、`skillListingBudgetFraction` / `"name-only"` 设置、「custom commands 已并入 skills」，均已于 2026-07-18 对照官方 skills 文档逐项核实。**已知不确定**：「skill 不触发的首要原因是含糊 description」出自单一社区来源，方向与官方排错指引一致但无官方量化；superpowers 的 `You MUST use this...` 写法属社区取舍，与官方第三人称建议有出入；token 经济学的三个数字（发现层中位 80、100 个约 1 万、GitHub MCP schema 5 万+）来自个人研究笔记转述 Anthropic 工程博客，未逐字回查原文。**易变**：预算类数字与 frontmatter 字段清单随 Claude Code 迭代变化，用前回查官方 skills 文档。</sub>
+<sub>**时效**：机制数字（metadata 约 100 tokens、正文 <500 行、`description` 字段上限 1024 字符、`description` + `when_to_use` 合并文本 1536 字符截断、compact 重挂载每技能保留前 5000 / 合计 25000 tokens）与 frontmatter 字段、同名优先级（企业 > 个人 > 项目 > 内置）、`skillListingBudgetFraction` / `"name-only"` 设置、skill-creator 评估流程、MCP tool search 默认开启（v2.1.7 起、10% 阈值）、「custom commands 已并入 skills」，均已于 2026-08-15 对照官方 skills 文档与官方 changelog 逐项核实；其中 1024 字符上限出自 platform 端 best practices，Claude Code 端文档现已不再单独标注该数字。**已知不确定**：「skill 不触发的首要原因是含糊 description」出自单一社区来源，方向与官方排错指引一致但无官方量化；superpowers 的 `You MUST use this...` 写法属社区取舍，与官方第三人称建议有出入；token 经济学的三个数字（发现层中位 80、100 个约 1 万、GitHub MCP schema 5 万+）来自个人研究笔记转述 Anthropic 工程博客，未逐字回查原文。**易变**：预算类数字与 frontmatter 字段清单随 Claude Code 迭代变化，用前回查官方 skills 文档。</sub>
 
 > 本篇个人实践（L4）：`[待补：BOSS 的实战经验——你封装过哪个 skill 解决了重复流程 / 或踩过 description 写太抽象不触发的坑 / superpowers 启用前后工作流的变化]`

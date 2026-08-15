@@ -8,7 +8,7 @@
 |---|---|---|
 | 压缩一次，刚定的方案就没了 | 把方案里「跨会话仍成立」的部分写进 `CLAUDE.md`，其余写进度文件 | 定完方案先落盘再继续干 |
 | 你第二次敲下和上次一样的纠正 | 这就是官方给的信号，把它写进记忆 | 纠正超过一次就落成规则 |
-| `MEMORY.md` 超过 200 行 | 立刻精简 —— 超出部分根本不加载 | 每月跑一次 `/memory` 逐条清 |
+| `MEMORY.md` 超过 200 行或 25KB | 立刻精简 —— 超出部分根本不加载 | 每月跑一次 `/memory` 逐条清 |
 | 它自信地引用了不存在的目录/命令 | 打开记忆文件删掉这条死指令 | 每条记忆写的时候顺手加失效条件 |
 | 不确定某条记忆有没有被加载 | 跑 `/context` 看实际加载清单，别看 `/memory` | 排查加载问题一律只认 `/context` |
 
@@ -34,7 +34,7 @@ flowchart TD
 1. **反复纠正过的偏好。** 「用 pnpm 不用 npm」「金额用分不用浮点」「commit message 用中文」。官方给的判据很硬：**当你第二次把同一句纠正敲进对话，就该写进去**[^1]。
 2. **只能靠踩坑学到的隐性知识。** 某测试需要本地 Redis、某次构建必须带 `--force`、某目录是自动生成的不能手改。判据是：**这条读代码看不出来** —— 你能 `grep` 出来的就不算。
 3. **跨会话的协作约定。** code review 反复抓到的问题、新人 onboarding 必须知道的协作方式、外部系统的入口（生产环境 URL、关键文档位置）。
-4. **指向外部资源的指针，而不是内容本身。** 写「架构详见 @docs/architecture.md」，不要把整份架构文档复制进来。注意：`@` import 进来的文件启动时仍会全量加载，**并不省 token**；真正省的是「只写路径、需要时才让它去读」。
+4. **指向外部资源的指针，而不是内容本身。** 写「架构详见 @docs/architecture.md」，不要把整份架构文档复制进来。注意：`@` import 进来的文件启动时仍会全量加载，**并不省 token**[^5]；真正省的是「只写路径、需要时才让它去读」。
 
 ### 不该记的 5 类
 
@@ -152,7 +152,7 @@ Claude Code 有两套记忆，都在每次会话开始时加载：
 ## 别这么干
 
 - ❌ **把 git 能查的状态写进记忆。** 「当前分支是 X」「依赖版本是 Y」一查就有，写进去只会随时间失效并误导后续会话。状态类信息永远走 git 和代码，不走记忆。
-- ❌ **记忆只增不删。** `MEMORY.md` 超过 200 行后超出部分根本不加载，你写的等于白写；过时的命令还会让 Claude 往不存在的目录里写文件。
+- ❌ **记忆只增不删。** `MEMORY.md` 超过 200 行或 25KB 后超出部分根本不加载，你写的等于白写；过时的命令还会让 Claude 往不存在的目录里写文件。
 - ❌ **把一次性计划或待办写进记忆。** 计划变化太快，记忆很快变成化石。用 issue tracker 或进度文件，绝不进 `CLAUDE.md` / `MEMORY.md`。
 - ❌ **指望记忆能强制执行。** 记忆是上下文不是配置。要让「提交前必须跑测试」万无一失，写 `PreToolUse` hook。
 - ❌ **把 API key、密码、生产密钥写进会被 git 跟踪的记忆。** project 级 `CLAUDE.md` 会进 git，auto memory 虽在本机也容易被误分享。用 `CLAUDE.local.md`（加 `.gitignore`）或 secrets manager。
@@ -168,13 +168,7 @@ Claude Code 有两套记忆，都在每次会话开始时加载：
 | **跨会话共享** | auto memory per-repo 本机本地；project-scope agent memory 可进 git | rules 进 git 共享；memories 偏个人 | 跨会话/跨 repo（Pro 用户） |
 | **上下文预算意识** | ⭐ 明确 200 行硬上限 + 「越短遵守率越高」官方建议 | 无文档化的明确上限 | 不透明 |
 
-**Claude Code 最透明、最有上下文预算意识。** 纯 markdown、可审计、有 200 行硬上限，官方也反复强调要短。auto memory 默认开启但完全可控。
-
-**GitHub Copilot 最「自动」，也最不透明。** Copilot Memory 从 2026-03-04 起对 Pro/Pro+ 默认开启（此前 opt-in 公测），自动学 repo 级事实（约定、架构、跨文件依赖），记忆严格限定在单个 repo，应用前会对当前代码库校验，28 天自动过期，用户可在 Repository Settings → Copilot → Memory 审查或删除。好处是零配置，风险是你不知道它到底记了什么。
-
-**Cursor 偏手动。** rules 体系成熟、支持 glob 作用域，但持久记忆要手动开 memories toggle。
-
-**共性趋势：三家都在走向「自动学习 + 可审计」的混合模型**，因为每次从零开始的 agent 体验太差。但自动不等于免维护 —— 越自动，越要定期审计。
+一句话总结：Claude Code 最透明、最有上下文预算意识（纯 markdown 可审计、200 行硬上限、官方反复强调要短）；GitHub Copilot 最「自动」也最不透明（2026-03-04 起对 Pro/Pro+ 默认开启，记忆限定单 repo、28 天自动过期，可在 Repository Settings → Copilot → Memory 审查删除，但你平时不知道它记了什么）；Cursor 偏手动（rules 成熟，持久记忆要手动开 toggle）。三家都在走向「自动学习 + 可审计」的混合模型，但自动不等于免维护 —— 越自动，越要定期审计。
 
 </details>
 
@@ -187,7 +181,8 @@ Claude Code 有两套记忆，都在每次会话开始时加载：
 - [#012 上下文窗口要爆了怎么办？](./012-上下文窗口要爆了.md) —— 记忆膨胀与 context rot 是同一枚硬币的两面
 - [#014 三份规则文件改一处漏两处怎么办？](./014-多份规则文件怎么同步.md) —— 多工具环境下手写层的真源方案
 
-**参考资料**
+<details>
+<summary>参考资料（10 条）</summary>
 
 - [How Claude remembers your project — Claude Code Docs](https://code.claude.com/docs/en/memory) —— 支撑两套记忆的分工表、`MEMORY.md` 200 行/25KB 上限、目录结构、`/memory` 与 `/context` 的区别、`/doctor` 体检、「记忆是上下文不是配置」（官方，2026-06）
 - [Automatic Memory Is Not Learning — Brent W. Peterson](https://medium.com/@brentwpeterson/automatic-memory-is-not-learning-4191f548df4c) —— 支撑「auto memory 是配置不是学习」「12 行实战案例」「两套系统不自动打通」「`/remember` 升舱命令」（社区，2026-02）
@@ -200,15 +195,18 @@ Claude Code 有两套记忆，都在每次会话开始时加载：
 - [Copilot Memory now on by default — GitHub Changelog](https://github.blog/changelog/2026-03-04-copilot-memory-now-on-by-default-for-pro-and-pro-users-in-public-preview/) —— 横向对比表里 Copilot 默认开启时间、28 天过期、审查入口的依据（官方，2026-03）
 - [GitHub Community 162797: Enable persistent memory in Copilot](https://github.com/orgs/community/discussions/162797) —— Copilot Memory 透明度讨论（社区）
 
+</details>
+
 [^1]: [Claude Code Docs: When to add to CLAUDE.md](https://code.claude.com/docs/en/memory)（官方，2026-06）：满足以下任一条才加 —— Claude 第二次犯同一个错；你敲下和上次会话相同的纠正；一个新同事也会需要同样的背景。
 [^2]: [Claude Code Docs: How Claude remembers your project](https://code.claude.com/docs/en/memory)（官方，2026-06）：`MEMORY.md` 每次只加载前 200 行或 25KB，超出不加载；主题文件启动时不加载，需要时才由文件工具读取。
 [^3]: [Automatic Memory Is Not Learning — Brent W. Peterson](https://medium.com/@brentwpeterson/automatic-memory-is-not-learning-4191f548df4c)（社区，2026-02）：auto memory 记下的是操作性配置而非习得知识；未接入 `MEMORY.md` 的自建教训系统对新会话完全不可见。
 [^4]: [What Is Claude Code Auto-Memory? — MindStudio](https://www.mindstudio.ai/blog/what-is-claude-code-auto-memory)（社区，2026-03）：值得记的条目需同时满足会反复出现、读代码推不出来、稳定不变、本项目独有四条。
+[^5]: [Claude Code Docs: Import additional files](https://code.claude.com/docs/en/memory)（官方，2026-08 核实）：imported 文件在启动时展开并随所引用的 CLAUDE.md 一并载入上下文；拆成 `@path` import 只利于组织，不减少上下文占用。
 
 ---
 
 <sub>难度 中级 · 流程题 · 主线 Claude Code，横向 Cursor / Copilot</sub>
 
-<sub>**时效**：`MEMORY.md` 前 200 行或 25KB 的加载上限、CLAUDE.md <200 行建议、auto memory 目录结构与开关、`/doctor` 体检（v2.1.206+）、`/memory` 与 `/context` 分工，已于 2026-07-18 对照官方 memory 文档核实。**已知不确定**：源码里 `pZ = 200` 的硬上限出自社区抓包，未见官方确证；四条筛选标准（recurrence / inferability / stability / specificity）是社区总结，非官方术语。**易变**：`/doctor` 依赖的版本号、Copilot Memory 的默认开启范围与 28 天过期策略，随版本迭代，用前回查各家官方文档。</sub>
+<sub>**时效**：`MEMORY.md` 前 200 行或 25KB 的加载上限、CLAUDE.md <200 行建议、`@` import 启动时全量加载、auto memory 目录结构与开关（`autoMemoryEnabled` / `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`）、`/doctor` 体检（v2.1.206+）、`CLAUDE.local.md` 仍为官方现行方案（跨 worktree 时官方建议改用 `@~/` import）、`/memory` 与 `/context` 分工，已于 2026-08-15 对照官方 memory 文档核实；Copilot Memory 默认开启日期与 28 天过期策略同日对照 GitHub Changelog 核实。**已知不确定**：源码里 `pZ = 200` 的硬上限出自社区抓包，未见官方确证；四条筛选标准（recurrence / inferability / stability / specificity）是社区总结，非官方术语。**易变**：`/doctor` 依赖的版本号、Copilot Memory 的默认开启范围与过期策略，随版本迭代，用前回查各家官方文档。</sub>
 
 > 本篇个人实践（L4）：`[待补：BOSS 的实战经验——你往 memory 里写过什么后来发现该删/该留的条目，或 auto memory 自动记了什么让你意外的案例]`

@@ -8,7 +8,7 @@
 |---|---|---|
 | 写的规则像完全没写过 | `/context` 看加载清单里有没有这个文件 | 只放标准路径，别自创目录 |
 | 加载了，但时灵时不灵 | 把这条改到「能用一条命令验证」 | 写不出验证方式的指令不写 |
-| 文件涨过 200 行后整体变差 | 砍回 200 行内，细节挪进 `.claude/rules/` | 每季度逐行过一遍，删死指令 |
+| 文件涨过 200 行后整体变差 | 砍回 200 行内，细节挪进带 `paths:` 的 `.claude/rules/` | 每季度逐行过一遍，删死指令 |
 | 行为前后矛盾 | 全文贴进新会话，问「哪些指令互相冲突」 | 加新指令前先搜有没有对立的旧条 |
 | 有条规则必须 100% 执行 | 改写成 hook | 硬约束一律不进 CLAUDE.md |
 | 它顺手改了没让改的地方 | 贴一段「自缚条款」进 CLAUDE.md | 交付前让它自报改动文件数与行数 |
@@ -32,10 +32,10 @@ flowchart TD
 
 排查「不生效」的第一步不是改内容，是跑 `/context`。它列出本会话实际加载进上下文的 memory 文件。文件不在这个清单里，说明 Claude 从头到尾没看见它，改多少内容都没用。
 
-`/memory` 是另一个工具：它列出各层级 `CLAUDE.md` / `CLAUDE.local.md` 的**位置**并支持直接打开编辑，但不告诉你哪份真的加载了。两个别用混 —— 排查加载问题只认 `/context`。
-
 <details>
-<summary>四个层级分别放哪里、进不进 git</summary>
+<summary>四个层级分别放哪里、进不进 git，以及 /memory 与 /context 的分工</summary>
+
+`/memory` 是另一个工具：它列出各层级 `CLAUDE.md` / `CLAUDE.local.md` 的**位置**并支持直接打开编辑，但不告诉你哪份真的加载了。两个别用混 —— 排查加载问题只认 `/context`。
 
 | 层级 | 位置 | 用途 | 是否进 git |
 |------|------|------|-----------|
@@ -90,7 +90,7 @@ flowchart TD
 官方建议单个 CLAUDE.md 控制在 200 行以内[^1]。超了有两条下沉路径，区别很关键：
 
 - `.claude/rules/*.md` **带 `paths:` 字段** —— 只在 Claude 改到匹配的文件时才加载，是唯一真省上下文的做法。API 规范、测试规范、前端规范适合放这里。
-- `@path/to/file` **import** —— 适合组织文件结构、复用已有的 AGENTS.md，但被导入的文件启动时仍然全量加载，**不省 token**[^9]。`.claude/rules/` 里不写 `paths:` 的文件同理，也是启动时全量进上下文，只是把一份长文件拆成几份，体积一点没少。真正按需加载的只有四类：Skills、`docs/` 里靠「Read when」提示让 Claude 主动去读的文档、子目录 CLAUDE.md、带 `paths:` 的 rules。
+- `@path/to/file` **import** —— 适合组织文件结构、复用已有的 AGENTS.md，但被导入的文件启动时仍然全量加载，**不省 token**[^9]。`.claude/rules/` 里不写 `paths:` 的文件同理，也是启动时全量进上下文，只是把一份长文件拆成几份，体积一点没少。常用的按需加载途径有四类：Skills、子目录 CLAUDE.md、带 `paths:` 的 rules（这三类官方文档明写按需加载[^9]），以及 `docs/` 里靠「Read when」提示让 Claude 主动去读的文档（实践做法）。
 
 <details>
 <summary>四种下沉机制的完整对照</summary>
@@ -102,7 +102,7 @@ flowchart TD
 | `.claude/rules/x.md`（带 `paths:`） | **匹配文件时才加载** | ✅ 是 | API 规范、测试规范、前端规范 |
 | `~/.claude/rules/` | 启动时（用户级，早于项目） | ❌ 否 | 个人偏好 |
 
-**代价提醒**：带 `paths:` 的规则在 `/compact` 之后会丢失，要等 Claude 再次读到匹配文件才回来。必须每次都生效的指令别用这个字段（见 [#012 上下文窗口要爆了怎么办](./012-上下文窗口要爆了.md)）。
+**代价提醒**：带 `paths:` 的规则在 `/compact` 之后不会自动重新注入，要等 Claude 再次读到匹配文件才回来[^11]。必须每次都生效的指令别用这个字段（见 [#012 上下文窗口要爆了怎么办](./012-上下文窗口要爆了.md)）。
 
 </details>
 
@@ -112,20 +112,16 @@ flowchart TD
 
 ### 第 6 步：定好增、删、升三个动作
 
-CLAUDE.md 是要长期维护的。对它只有三种合法操作：**增**（加一条规则）、**删**（去掉一条已经不需要的）、**升**（把一条老被违反的规则改写成 hook）。增是 +1 行，删和升都是 −1 行，所以维护得健不健康有个可算的判据：
-
-```
-每次增，必须伴随一次删或一次升；一个周期下来，删 + 升 ≥ 增
-```
-
-做不到这个不等式[^10]，文件就是单调膨胀，一年后会变成一份没人敢动、也没人真在遵守的长文档。发现新坑很爽所以「增」总会自己发生，「删」要靠纪律，得写成流程。
+CLAUDE.md 是要长期维护的。对它只有三种合法操作：**增**（加一条规则）、**删**（去掉一条已经不需要的）、**升**（把一条老被违反的规则改写成 hook）。增是 +1 行，删和升都是 −1 行，所以维护得健不健康有个可算的判据：**每次增，必须伴随一次删或一次升；一个周期下来，删 + 升 ≥ 增**[^10]。做不到这个不等式，文件就是单调膨胀，一年后会变成一份没人敢动、也没人真在遵守的长文档。发现新坑很爽所以「增」总会自己发生，「删」要靠纪律，得写成流程。
 
 **怎么增：只为已经发生过的失败加规则。** 官方给的触发条件很具体 —— Claude 第二次犯同一个错、code review 抓到一个它本该知道的项目约定、你这次又在聊天里敲了上次敲过的同一句纠正[^5]。三条都是「已经发生过」。反过来，「万一它以后……」这种假想边界不加规则，Copilot 官方的元规范把这种膨胀单独列成反模式[^6]。
 
 **怎么减：逐行做一次删除测试。** 对每一行问一句：**「删掉这行，Claude 会犯错吗？」** 答不上来的删掉。这个问法比「这条重不重要」好用，因为它逼你说出一个具体的错误场景 —— 说不出场景，说明这行是在写给人看的文档，不是在给 Claude 补它猜不到的信息。
 
+**怎么升：同一条规则被违反 3 次，就别再嘴上说了，改写成 hook 或 CI 检查。** 违反次数、删除判据、季度节奏和查矛盾的具体做法折叠在下面。
+
 <details>
-<summary>失败记录本怎么建，以及三条一看就能判的删除判据</summary>
+<summary>失败记录本怎么建、三条删除判据、「升」的触发信号与季度节奏</summary>
 
 建一个 `docs/ai-misses.md`（或 issue label），每次跑偏就记一行「日期 + 现象 + 当时的任务」。**同一条现象记到第 2 次，才允许往 CLAUDE.md 加规则**，并在规则后面用 HTML 注释挂上出处，比如 `<!-- 2026-07-02, 2026-07-15 两次把 handler 写进 src/utils -->`。块级 HTML 注释在注入前会被剥掉，不占 token[^7]。这份记录同时也是「删」和「升」的数据源 —— 数违反次数、看某条规则是不是很久没再出现，都靠它。
 
@@ -135,11 +131,11 @@ CLAUDE.md 是要长期维护的。对它只有三种合法操作：**增**（加
 | 无出处的规则 | 规则后面没有失败记录的注释，且没人说得出它当初为什么加 | 删，等它再犯一次再加回来 |
 | 已被自动遵循 | 连续几周的失败记录里，这条一次都没再出现 | 删，Claude 已经不需要被提醒 |
 
+**「升」的触发**：违反次数不是拍脑袋数的，去 CI / lint 日志、code review 记录里数。数到 3 说明「写进 CLAUDE.md 靠模型自觉」这条路对它无效，继续加强措辞（加粗、`IMPORTANT:`、再写一遍）只是浪费行数 —— 改写成 hook 或 CI 检查，规则从文件里删掉，体积还降了。同一条规则你在会话里连着 3 次说「这次不用管它」则是反向信号：不是要升级，是这条本身太死，改写成带条件的表述或降级到 `.claude/rules/`。
+
+**节奏**：每季度过一遍即可。另外 `/doctor` 自带一项 CLAUDE.md 瘦身检查：它会提议砍掉 Claude 能自己从代码库看出来的内容（目录结构、依赖清单、架构概览），保留坑点、理由和与工具默认不同的约定；需要 Claude Code v2.1.206 及以上[^8]。**查矛盾**：把整份 CLAUDE.md 贴进一个新会话，问「哪些指令互相冲突？」。Claude 很擅长找出自己被喂的矛盾指令。官方也明说两条规则打架时它会**任选一条**，所以矛盾不是「偶尔出错」，是行为直接变得不可预测[^2]。
+
 </details>
-
-**怎么升：同一条规则被违反 3 次，就别再嘴上说了。** 违反次数不是拍脑袋数的，去 CI / lint 日志、code review 记录里数。数到 3 说明「写进 CLAUDE.md 靠模型自觉」这条路对它无效，继续加强措辞（加粗、`IMPORTANT:`、再写一遍）只是浪费行数 —— 改写成 hook 或 CI 检查，规则从文件里删掉，体积还降了。同一条规则你在会话里连着 3 次说「这次不用管它」则是反向信号：不是要升级，是这条本身太死，改写成带条件的表述或降级到 `.claude/rules/`。
-
-节奏上每季度过一遍即可。另外 `/doctor` 自带一项 CLAUDE.md 瘦身检查：它会提议砍掉 Claude 能自己从代码库看出来的内容（目录结构、依赖清单、架构概览），保留坑点、理由和与工具默认不同的约定；需要 Claude Code v2.1.206 及以上[^8]。**查矛盾**：把整份 CLAUDE.md 贴进一个新会话，问「哪些指令互相冲突？」。Claude 很擅长找出自己被喂的矛盾指令。官方也明说两条规则打架时它会**任选一条**，所以矛盾不是「偶尔出错」，是行为直接变得不可预测[^2]。
 
 <details>
 <summary>一份合格的项目级 CLAUDE.md（不到 60 行的完整示例）</summary>
@@ -179,19 +175,17 @@ CLAUDE.md 是要长期维护的。对它只有三种合法操作：**增**（加
 
 官方文档写得很清楚：CLAUDE.md 的内容是作为一条**用户消息**放在系统提示之后送进去的，不是系统提示的一部分；Claude 会读、会尽量遵守，但不保证严格照做，遇到模糊或互相冲突的指令时尤其如此[^2]。
 
-还有个更决定性的细节：Claude Code 在 CLAUDE.md 之后会再附加一段 `important-instruction-reminders`，其中一句的意思是「这段上下文可能和你的任务相关也可能无关，除非高度相关否则不要理会它」[^3]。也就是说，Claude 会自己判定你的指令跟当前任务相不相关，判定为不相关就直接跳过。
-
-这解释了为什么「时灵时不灵」是常态，也解释了为什么硬约束必须走 hook。
+还有个更决定性的细节：Claude Code 在 CLAUDE.md 之后会再附加一段 `important-instruction-reminders`，其中一句的意思是「这段上下文可能和你的任务相关也可能无关，除非高度相关否则不要理会它」[^3]。也就是说，Claude 会自己判定你的指令跟当前任务相不相关，判定为不相关就直接跳过。这解释了为什么「时灵时不灵」是常态，也解释了为什么硬约束必须走 hook。
 
 ### 指令越多，遵守率越低 —— 而且是均匀下降
 
 社区研究的结论是：前沿推理模型能稳定跟随大约 150 到 200 条指令；超过之后，遵循质量是**均匀下降**的 —— 不是只忽略排在后面的，而是所有指令都开始被差不多的概率忽视[^4]。Claude Code 自身的系统提示已经占掉约 50 条，留给你的可靠跟随预算本来就不多。
 
-这就是 200 行上限的由来：它不是排版洁癖，是把有限的跟随预算花在真正每次都要用的指令上。
+注意这是两个不同口径的数字：200 行是官方给的文件长度建议，150–200 条是社区实测的指令跟随上限，二者只是在量级上互相印证，不是推导关系。共同的结论是：跟随预算有限，只放真正每次都要用的指令。
 
 ### compact 之后，只有一部分指令会回来
 
-项目根目录的 `CLAUDE.md` 在 `/compact` 之后会从磁盘重新读取并重新注入；子目录里嵌套的 CLAUDE.md、以及带 `paths:` 的 rules 不会自动回来，要等 Claude 再次读到对应目录/文件。所以「必须每次都生效」的指令，务必放根目录、不加 `paths:`。
+项目根目录的 `CLAUDE.md` 在 `/compact` 之后会从磁盘重新读取并重新注入；子目录里嵌套的 CLAUDE.md、以及带 `paths:` 的 rules 不会自动回来，要等 Claude 再次读到对应目录/文件[^11]。所以「必须每次都生效」的指令，务必放根目录、不加 `paths:`。
 
 ## 别这么干
 
@@ -208,8 +202,8 @@ CLAUDE.md 是要长期维护的。对它只有三种合法操作：**增**（加
 |------|----------|------------|---------|
 | **Claude Code** | `CLAUDE.md`（多层级）+ `.claude/rules/*.md`（带 `paths`）+ `@import` | 4 层级拼接注入；rules 可按 glob 条件加载 | 层级最丰富；强调「上下文非配置」；官方建议 <200 行 |
 | **Cursor** | 旧 `.cursorrules`（已弃用）→ 新 `.cursor/rules/*.mdc` | 旧：每次请求全量注入；新：4 种激活模式（Always/Auto/Glob/Manual） | MDC 用 YAML frontmatter（`globs`/`alwaysApply`）；`alwaysApply:true` 等价旧 `.cursorrules` |
-| **GitHub Copilot** | `.github/copilot-instructions.md` | 仓库根单文件，IDE 内自动注入 chat/inline | 无多层级、无条件加载机制；**GitHub.com 的 Code Review 可能不读它** |
-| **Cline** | `.clinerules`（项目根） | 类似旧 `.cursorrules`，线性加载 | 概念相同但更偏 agent 化；上下文窗口最大可达 1M token（取决于所选 provider/模型） |
+| **GitHub Copilot** | `.github/copilot-instructions.md` + 路径级 `*.instructions.md` | 仓库根文件自动注入 chat/inline；官方文档明确 Code Review 也默认读取 | 层级少；社区仍有 Code Review「时灵时不灵」的反馈，与官方文档表述有出入 |
+| **Cline** | `.clinerules`（项目根） | 类似旧 `.cursorrules`，线性加载 | 概念相同但更偏 agent 化 |
 
 共性趋势：所有主流工具都在从「单文件全量注入」走向「按文件类型或路径条件加载」。Cursor 的 glob、Claude Code 的 `paths` rules、Cline 的 memory bank，本质是同一件事 —— 渐进式披露（用到时才加载对应内容），目的是避免上下文膨胀。
 
@@ -228,7 +222,7 @@ CLAUDE.md 是要长期维护的。对它只有三种合法操作：**增**（加
 
 **参考资料**
 
-- [How Claude remembers your project — Claude Code Docs](https://code.claude.com/docs/en/memory) —— 支撑本篇的层级加载表、200 行建议、`/context` 排查顺序、compact 后的重新注入规则、加规则的四个时机、HTML 注释不占 token、`/doctor` 瘦身检查（官方，2026-08 复核）
+- [How Claude remembers your project — Claude Code Docs](https://code.claude.com/docs/en/memory) —— 支撑本篇的层级加载表、200 行建议、`/context` 排查顺序、compact 后的重新注入规则、加规则的四个时机、HTML 注释不占 token、`/doctor` 瘦身检查（官方，2026-08-15 复核）
 - BOSS 的 CLAUDE.md 军规与规则治理笔记（个人实践，2026-06）—— 支撑「删除测试」这一瘦身判据、增 / 删 / 升三动作与净归约不等式、「违反 3 次升级为 hook」、人格指令与「只给禁令不给替代」两条反模式
 - [github/awesome-copilot: instructions.instructions.md](https://github.com/github/awesome-copilot/blob/main/instructions/instructions.instructions.md) —— 支撑「不为假想边界加规则」这条反模式（GitHub 官方仓库，2026-08）
 - [Writing a good CLAUDE.md — HumanLayer Blog](https://www.humanlayer.dev/blog/writing-a-good-claude-md) —— 支撑「指令跟随均匀衰减」「系统提示已占约 50 条」「必须逐行手改而非 `/init` 直接用」（社区权威，2025-11）
@@ -237,24 +231,25 @@ CLAUDE.md 是要长期维护的。对它只有三种合法操作：**增**（加
 - [This is why Claude Code sometimes ignores your claude.md — r/ClaudeAI](https://www.reddit.com/r/ClaudeAI/comments/1ldugmg/this_is_why_claude_code_sometimes_ignore_your/) —— 支撑 `important-instruction-reminders` 注入机制与 `coderules.md` 社区技巧（社区，2025-05）
 - [The CLAUDE.md Memory System — SFEIR Institute](https://institute.sfeir.com/en/claude-code/claude-code-memory-system-claude-md/faq/) —— 支撑「指令要具体可验证」的写法清单（社区，2025）
 - [Optimizing Coding Agent Rules — Arize Blog](https://arize.com/blog/optimizing-coding-agent-rules-claude-md-agents-md-clinerules-cursor-rules-for-improved-accuracy/) —— 横向对比里「优化 rules 提升准确率 10–15%」的唯一来源（社区，2025，单源）
-- [Adding repository custom instructions for GitHub Copilot — GitHub Docs](https://docs.github.com/copilot/customizing-copilot/adding-custom-instructions-for-github-copilot) / [GitHub Community 187926](https://github.com/orgs/community/discussions/187926) —— 横向对比里 Copilot 一行的依据（官方 + 社区）
+- [Adding repository custom instructions for GitHub Copilot — GitHub Docs](https://docs.github.com/copilot/customizing-copilot/adding-custom-instructions-for-github-copilot) / [Customize Copilot code review — GitHub Docs](https://docs.github.com/en/copilot/tutorials/customize-code-review) / [GitHub Community 187926](https://github.com/orgs/community/discussions/187926) —— 横向对比里 Copilot 一行的依据：官方文档明确 Code Review 默认读取 `copilot-instructions.md` 与路径级 `*.instructions.md`（官方，2026-08-15 核实）；「时灵时不灵」为社区反馈
 - [r/cursor: .cursor/rules MDC files](https://www.reddit.com/r/cursor/comments/1idg434/anyone_else_finding_the_the_new_mdc_cursorrules/) —— 横向对比里 Cursor MDC 机制的依据（社区，2025-02）
 
-[^1]: [Claude Code Docs: Choose where to put CLAUDE.md files](https://code.claude.com/docs/en/memory)（官方，2026-06）：建议每个 CLAUDE.md 文件保持在 200 行以内，过长会消耗更多上下文并降低遵守率。
-[^2]: [Claude Code Docs: Troubleshoot memory issues](https://code.claude.com/docs/en/memory)（官方，2026-06）：CLAUDE.md 以系统提示之后的一条用户消息投递，不保证严格遵守，模糊或冲突指令尤甚。
+[^1]: [Claude Code Docs: Write effective instructions](https://code.claude.com/docs/en/memory)（官方，2026-08-15 核实）：建议每个 CLAUDE.md 文件保持在 200 行以内，过长会消耗更多上下文并降低遵守率。
+[^2]: [Claude Code Docs: Troubleshoot memory issues](https://code.claude.com/docs/en/memory)（官方，2026-08-15 核实）：CLAUDE.md 以系统提示之后的一条用户消息投递，不保证严格遵守，模糊或冲突指令尤甚。
 [^3]: [This is why Claude Code sometimes ignores your claude.md — r/ClaudeAI](https://www.reddit.com/r/ClaudeAI/comments/1ldugmg/this_is_why_claude_code_sometimes_ignore_your/)（社区，2025-05）：揭示附加在 CLAUDE.md 之后的 `important-instruction-reminders` 段落；HumanLayer 通过抓取 `ANTHROPIC_BASE_URL` 请求独立验证了同样的注入顺序。
 [^4]: [Writing a good CLAUDE.md — HumanLayer Blog](https://www.humanlayer.dev/blog/writing-a-good-claude-md)（社区权威，2025-11）：前沿推理模型可稳定跟随约 150–200 条指令，超出后遵循质量均匀下降，Claude Code 系统提示已占约 50 条。
-[^5]: [Claude Code Docs: When to add to CLAUDE.md](https://code.claude.com/docs/en/memory)（官方，2026-08）：给出四个添加时机 —— Claude 第二次犯同一个错、code review 抓到它本该知道的项目知识、你重复敲同一句纠正、新同事需要同样的上下文。
+[^5]: [Claude Code Docs: When to add to CLAUDE.md](https://code.claude.com/docs/en/memory)（官方，2026-08-15 核实）：给出四个添加时机 —— Claude 第二次犯同一个错、code review 抓到它本该知道的项目知识、你重复敲同一句纠正、新同事需要同样的上下文。
 [^6]: [github/awesome-copilot: instructions.instructions.md](https://github.com/github/awesome-copilot/blob/main/instructions/instructions.instructions.md)（GitHub 官方仓库，2026-08 核实）：把 "Hypothetical-rule inflation: Do not add rules for failures that have not occurred" 列为编写指令文件的反模式。
-[^7]: [Claude Code Docs: How CLAUDE.md files load](https://code.claude.com/docs/en/memory)（官方，2026-08）：CLAUDE.md 中的块级 HTML 注释在注入上下文前被剥除，可用于给人类维护者留注记而不消耗 token。
-[^8]: [Claude Code Docs: My CLAUDE.md is too large](https://code.claude.com/docs/en/memory)（官方，2026-08）：`/doctor` 会为已提交的 CLAUDE.md 提出瘦身建议，砍掉可从代码库推导的内容、保留坑点与非默认约定；该检查需 v2.1.206 及以上。
-[^9]: [Claude Code Docs: Import files](https://code.claude.com/docs/en/memory)（官方，2026-08 核实）：被 `@` 导入的文件在会话启动时即载入上下文窗口，导入不减少上下文占用；`.claude/rules/` 只有带 `paths:` 字段时才做条件加载。
+[^7]: [Claude Code Docs: How CLAUDE.md files load](https://code.claude.com/docs/en/memory)（官方，2026-08-15 核实）：CLAUDE.md 中的块级 HTML 注释在注入上下文前被剥除，可用于给人类维护者留注记而不消耗 token。
+[^8]: [Claude Code Docs: My CLAUDE.md is too large](https://code.claude.com/docs/en/memory)（官方，2026-08-15 核实）：`/doctor` 会为已提交的 CLAUDE.md 提出瘦身建议，砍掉可从代码库推导的内容、保留坑点与非默认约定；该检查需 v2.1.206 及以上。
+[^9]: [Claude Code Docs: Import files / How CLAUDE.md files load / Organize rules](https://code.claude.com/docs/en/memory)（官方，2026-08-15 核实）：被 `@` 导入的文件在会话启动时即载入上下文窗口，导入不减少上下文占用；`.claude/rules/` 只有带 `paths:` 字段时才做条件加载；子目录 CLAUDE.md 在 Claude 读到该目录文件时才加载；Skills 仅在被调用或被判定相关时加载。
 [^10]: BOSS 的规则治理笔记（个人实践，2026-06）：把 CLAUDE.md 的维护归结为增 / 删 / 升三个动作，并用「删 + 升 ≥ 增」作为文件不膨胀的判据；「同一规则被违反约 3 次即升级为 hook」在同一份笔记里标为社区经验法则，未见官方确证。
+[^11]: [Claude Code Docs: Instructions seem lost after /compact](https://code.claude.com/docs/en/memory)（官方，2026-08-15 核实）：项目根 CLAUDE.md 在 compact 后从磁盘重读并重新注入；子目录嵌套的 CLAUDE.md 与带 `paths:` 的 rules 不自动重注入，等 Claude 再次读到对应目录或匹配文件时才重新加载。
 
 ---
 
 <sub>难度 中级 · 配置题 · 主线 Claude Code，横向 Cursor / Copilot / Cline</sub>
 
-<sub>**时效**：注入机制（以 user message 形式投递、不保证严格遵守）、200 行建议、四层加载顺序、`/context` 与 `/memory` 分工，已于 2026-07-18 对照官方 memory 文档核实；「第二次犯同一个错才加规则」「矛盾规则会被任选一条」「块级 HTML 注释不占 token」「`/doctor` 的 CLAUDE.md 瘦身检查（需 v2.1.206+）」「`@import` 与无 `paths:` 的 rules 在启动时全量载入、不减少上下文占用」于 2026-08-04 对照同一份官方文档核实。**已知不确定**：「150–200 条指令」「系统提示占约 50 条」「优化 rules 提升准确率 10–15%」均为社区单源，未见官方确证；「自缚条款」这一整段片段的具体措辞、以及「同一现象记满 2 次才加规则」「同一条规则豁免 3 次就改写」的阈值，都是实践约定而非官方或实测结论，按自己的节奏调；「增 / 删 / 升三动作与删 + 升 ≥ 增」出自个人实践笔记，「同一规则违反约 3 次就升级为 hook」是社区经验法则，两者均未见官方确证；300 行上限是社区流行说法，本篇统一按官方的 200 行给行动阈值。**易变**：第三方工具（Cursor `.mdc`、Copilot、Cline）的规则文件机制迭代快，落地前查各家官方文档。</sub>
+<sub>**时效**：注入机制（以 user message 形式投递、不保证严格遵守）、200 行建议、四层加载顺序、`/context` 与 `/memory` 分工、「第二次犯同一个错才加规则」「矛盾规则会被任选一条」「块级 HTML 注释不占 token」「`/doctor` 的 CLAUDE.md 瘦身检查（需 v2.1.206+）」「`@import` 与无 `paths:` 的 rules 在启动时全量载入、不减少上下文占用」「compact 后的重注入范围（根 CLAUDE.md 重注入；子目录 CLAUDE.md 与带 `paths:` 的 rules 不自动重注入）」，已于 2026-08-15 对照官方 memory 文档核实；Copilot Code Review 默认读取 `copilot-instructions.md` 已于 2026-08-15 对照 GitHub 官方文档核实。**已知不确定**：「150–200 条指令」「系统提示占约 50 条」「优化 rules 提升准确率 10–15%」均为社区单源，未见官方确证；「自缚条款」这一整段片段的具体措辞、以及「同一现象记满 2 次才加规则」「同一条规则豁免 3 次就改写」的阈值，都是实践约定而非官方或实测结论，按自己的节奏调；「增 / 删 / 升三动作与删 + 升 ≥ 增」出自个人实践笔记，「同一规则违反约 3 次就升级为 hook」是社区经验法则，两者均未见官方确证；300 行上限是社区流行说法，本篇统一按官方的 200 行给行动阈值。**易变**：第三方工具（Cursor `.mdc`、Copilot、Cline）的规则文件机制迭代快，落地前查各家官方文档。</sub>
 
 > 本篇个人实践（L4）：`[待补：BOSS 的实战经验/踩坑]`
