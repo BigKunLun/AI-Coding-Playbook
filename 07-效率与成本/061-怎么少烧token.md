@@ -29,7 +29,7 @@ flowchart TD
 
 按「性价比 × 你能控制的程度」排序：1–2 不花力气就有收益，3–6 是每天要拧的螺丝，7–9 是进阶。
 
-**1. 别拆掉缓存地基。** MCP server 只在会话开始时连好，不要中途连或断；一段会话内不要频繁切模型——**effort 档位同理**，中途改同样打爆 prompt cache，官方指南给的保缓存姿势是用 per-message effort（beta）按条消息调档，而不是动顶层设置[^11]；不要每轮把时间戳或 UUID 注进 CLAUDE.md 或系统提示。这条不需要多做什么，只需要不做破坏动作。另有一个藏在子代理里的同类坑：**主会话缓存默认 1 小时、子代理等后台请求默认只有 5 分钟**——任何超过 5 分钟的工具调用（测试、构建、git hook）返回后，子代理的整个前缀按写价重写。官方设置 `subagentPromptCacheTtl`（可选 `"5m"` / `"1h"`，v2.1.242+）一行解决，社区实测把 cache 写费用降到约四分之一[^11]。
+**1. 别拆掉缓存地基。** MCP server 只在会话开始时连好，不要中途连或断；一段会话内不要频繁切模型——**effort 档位同理**，中途改同样打爆 prompt cache，官方博客与 prompting 指南口径一致[^11][^15]；不要每轮把时间戳或 UUID 注进 CLAUDE.md 或系统提示。这条不需要多做什么，只需要不做破坏动作。另有一个藏在子代理里的同类坑：**主会话缓存默认 1 小时、子代理等后台请求默认只有 5 分钟**——任何超过 5 分钟的工具调用（测试、构建、git hook）返回后，子代理的整个前缀按写价重写。官方设置 `subagentPromptCacheTtl`（可选 `"5m"` / `"1h"`，v2.1.242+）一行解决，社区实测把 cache 写费用降到约四分之一[^11]。
 
 <details>
 <summary>怎么确认没被拆（及 ccusage 的口径限制）</summary>
@@ -63,7 +63,9 @@ flowchart TD
 
 **5. 主动 `/compact` 并指定保留什么。** 别等窗口爆了才压。写法 `/compact Focus on code samples and API usage`；也可以写进 CLAUDE.md 的 `# Compact instructions` 段固化。机制侧见 [#012 上下文窗口要爆了怎么办](../02-上下文工程/012-上下文窗口要爆了.md)。
 
-**6. prompt 写具体。** "improve this codebase" 会触发全库扫描；"add input validation to the login function in auth.ts" 让它读最少的文件就开工。改动前先用 plan mode（连按两次 `Shift+Tab`）探一探，避免走错方向后的昂贵返工。
+**压之前先分清是「想丢掉最近几轮」还是「真的要压」。** 最近几轮跑偏了、想当它没发生，用 `/rewind` 退到那几轮之前：它只从尾部截掉，前面的前缀原样还在缓存里，官方原话是「costs nothing」；`/compact` 是把整段对话重写一遍，官方原话是「it always costs something」。真要压缩，官方给的时机建议是挑长休息前压——「before a long break」比休息后便宜[^15]。
+
+**6. prompt 写具体，点到的文件直接 `@` 挂上去。** "improve this codebase" 会触发全库扫描；"add input validation to the login function in auth.ts" 让它读最少的文件就开工。再进一步：与其在句子里点名文件让它自己去找，不如直接 `@auth.ts` —— 文件当场挂进这条消息，省掉一次 Read 调用，它找不着时还省掉一轮搜索[^15]。改动前先用 plan mode（连按两次 `Shift+Tab`）探一探，避免走错方向后的昂贵返工。
 
 **7. 大输出操作丢给 subagent，或用 hook 先过滤。** 跑测试、抓文档、处理日志这类活交给 subagent，冗长内容留在子上下文，只把摘要回给主上下文。也可以用 PreToolUse hook 在命令执行前改写它（见下面的折叠块）。这套 hook 思路的工业级版本：Spotify 工程团队用 PreToolUse hook 拦截超长文件读取（>350 行）和样板代码生成，改派给一个廉价 worker 模型（示例用 Gemini 2.5 Flash）处理，原始内容不进主模型上下文、只回结构化摘要，实测主链路 token 省约 90%[^9]——「贵模型只看摘要、便宜模型啃原文」在本篇第 6 条之外又多了一个可抄的自动化形态。该方案 09-09 起已插件化：`claude plugin marketplace add spotify/portal-ai-plugins` 装上 portal / shunt 两个插件即可获得同样的强制路由，不必自己维护 hook（Reddit 488 分帖为安装指引的主要传播源）。
 
@@ -226,6 +228,7 @@ CLAUDE.md 在会话启动时就载入上下文。如果里面塞了专项工作�
 [^12]: [r/ClaudeAI: PSA — Turn off Prompt Suggestions, save ~10% of limits](https://www.reddit.com/r/ClaudeAI/comments/1wm8adm/)（社区，2026-09-21，554 分 / 111 评论）：输入建议词每次触发对全上下文做一次 cache read，仪表化实测中位数成本约为正常 prompt 的 91%、最高吃掉约 10% 周限额。**单人仪表化实测，方法在帖内公开**；关闭入口为设置里的 Prompt Suggestions 开关。
 [^13]: [r/ClaudeAI: 56% of my Claude Code usage was Claude re-reading the conversation](https://www.reddit.com/r/ClaudeAI/comments/1wzhbfc/)（社区，2026-10-06，239 分 / 76 评论）：6 个月自有 transcript 按 API 价折算，仅 20% 有效工作、56% 重读对话；对策 /clear 隔离小任务 + `CLAUDE_CODE_AUTO_COMPACT_WINDOW: 200000`。250k 砍窗自救见 [1x5vtb1](https://www.reddit.com/r/ClaudeAI/comments/1x5vtb1/)（10 分 / 11 评论，Max 20x、feature sprint 场景自述）。**均为单人 transcript 审计**；官方 2.1.299 起默认开启 idle compaction、社区亦确认 cache 过期前自动 compact 行为，方向一致。
 [^14]: [r/ClaudeAI: 读 transcript 查 token 去向（/scrooge）](https://www.reddit.com/r/ClaudeAI/comments/1wx7c7u/)（社区，2026-10-04 尾部帖二次确认，0 分 / 10 评论）：四个泄漏与修法如正文；两天后 cost/call $0.100→$0.059。**单人审计+自述数字**，帖内附方法可复跑。
+[^15]: [Maximizing the value of your Claude Code sessions — Claude Blog](https://claude.com/blog/maximizing-the-value-of-your-claude-code-sessions)（官方，作者 Lydia Hallie，2026-08-23 核实）：原文 TL;DR「Set your model and effort level before you start. Changing either one mid-conversation can bust your prompt cache」「@-mention files instead of naming them. The file gets attached to your message directly, which saves a Read call, or a search if Claude has to go find it」；正文「if the last few turns went somewhere you don't want to keep, /rewind to just before them instead of running /compact. Rewinding only cuts those turns off the end, so everything before them is still cached and it costs nothing. Compacting rewrites the whole conversation, so it always costs something」；对 `/compact` 的时机另建议挑长休息前压（「a lot cheaper before a long break than after one」）。注意原文「会话开始或刚 `/clear` 后便宜、长对话中间贵」一句说的是**中途切换模型或 effort** 的时机，不是 `/compact`。
 
 ---
 

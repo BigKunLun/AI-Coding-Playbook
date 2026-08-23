@@ -252,6 +252,8 @@ export ANTHROPIC_MODEL=opusplan  # 3. 环境变量（只影响这一个会话）
 
 两个细节：`opusplan` 的 Opus 规划阶段与 `opus` 用同样的上下文窗口；不在自动升级 1M 的订阅档位、又想两阶段都用 1M，把模型设成 `opusplan[1m]`。`ANTHROPIC_DEFAULT_OPUS_MODEL` / `ANTHROPIC_DEFAULT_SONNET_MODEL` 分别决定 plan / 非 plan 阶段用哪个具体版本。
 
+**别拿 v2.1.236 新增的 `ANTHROPIC_DEFAULT_MODEL` 来设 opusplan**：官方明写该变量取值为 `default` / `inherit` / `opusplan` / `haiku` 时会被直接忽略，`Default` 档照旧解析，不报错也不生效[^8]。想让新会话默认走两阶段路由，只能用上面那四个入口。
+
 **怎么确认生效**：进 plan mode 后跑 `/status`，模型应显示 Opus 系；批准计划退出后再跑一次，应变成 Sonnet 系。两次一致说明没生效 —— 最常见原因是项目或托管设置里的 `model` 字段优先级更高，启动时的头部提示会写明是哪个设置文件设的。
 
 </details>
@@ -356,6 +358,7 @@ Anthropic 最佳实践里有一个独立小节叫「Explore first, then plan, th
 [^5]: [CC Docs: Permission modes](https://code.claude.com/docs/en/permission-modes)（官方，2026-08-15 复核）：`useAutoModeDuringPlan` 默认为开（原文「which it is by default」），开启时规划阶段的 shell 命令交由分类器审而不再弹窗；同页注明 Pro / Max / Team 计划的内置起始权限档为 auto（原文「On Pro, Max, and Team plans, the built-in starting mode is auto mode」，需 CLI v2.1.228+）。此前草稿引用的「2026-08-14 起生效」具体日期在当前官方页面已不可见，本文不再采用。
 [^6]: [Keep Claude working toward a goal — Claude Code Docs](https://code.claude.com/docs/en/goal)（官方，2026-08-15 核实）：`/goal` 把你给的条件设为会话终止条件，每轮结束由一个独立的小模型评估器对照全量对话判断是否达成，未达成则把原因注入下一轮继续做。
 [^7]: [The AI-Native SDLC Playbook — Claude Academy](https://academy.claude.com/courses/ai-native-sdlc-playbook)（官方，Anthropic Applied AI 团队，2026-08-21）：六阶段（Plan → Design → Build → Test → Deploy → Maintain）每阶段以提交进版本库的 markdown 产物收口（intent.md / spec.md / plan.md / PR / incident record），逐行人审替换为 agent review + evals + 部署闸门，人的批准点是各阶段 gate。
+[^8]: [Model configuration — Claude Code Docs](https://code.claude.com/docs/en/model-config)（官方，2026-08-23 核实）：原文列出 Claude Code 忽略 `ANTHROPIC_DEFAULT_MODEL` 的几种情形，其一为「You set it to `default`, `inherit`, `opusplan`, or `haiku`」，此时 `Default` 档按未设该变量解析；另见 [CHANGELOG v2.1.236](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md)（官方，2026-08-23 核实）该变量的引入条目。
 
 ---
 

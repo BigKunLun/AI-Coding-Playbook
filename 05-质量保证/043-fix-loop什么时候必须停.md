@@ -45,6 +45,8 @@ flowchart TD
 
 官方对 L1 的表述是：一个干净的会话配一个更好的 prompt，几乎总是胜过一个攒满修正的长会话。obra 对 L2 的表述是：修复次数达到或超过 3 次就停下并质疑架构，不经过架构层面的讨论不要去试第 4 次。L3 的 5 次上限来自社区方法论，不是官方数字，当默认值用、可按项目调。
 
+**反过来，有一个信号不该算进计数：AI 自己宣称「这问题无解、写份报告算了」。** 这四层触发的都是可数的客观事实，而 AI 的退缩是行为倾向、不是技术判断。Linus Torvalds 在一次内核显存 bug 的排查记录里写过：AI 好几次直接断定问题不可能解决、建议就此写份报告收尾，但每次被他推回去，它都会继续老实加调试代码、继续分析，这场「地狱级」调试最后是靠人不松口才走完的；他自己的说法是，训练它的人多半没他这么固执[^7]。停不停以上面四层的计数为准，别把它的放弃当成结论。
+
 这四条硬触发靠人记着数次数很容易漏，可以用 Stop hook 把"这轮还剩哪些收尾没做"以 `additionalContext` 注入回去（不是 `decision: block`），配置见 [#083 我配了 deny 规则，它照样删了我的东西](../09-工具可靠性/083-permissions和hooks拦不住.md) 的第 6 步「hook 的三个正面用法」。
 
 <details>
@@ -224,6 +226,7 @@ flowchart TD
 [^4]: [Medium @waleedk: fixloops](https://waleedk.medium.com/getting-out-of-the-cycle-fixloops-make-ai-codevelopment-more-productive-33d2e40e0e1f)（社区方法论，2025-12）：fixloop 指让 AI 自己判断有没有修好、没修好就再试。原文给的护栏是迭代上限、成本监控、人工介入；"验证信号 / 迭代上限 / 人监督"这组三分法是本篇按其定义与护栏归纳的，原文未如此并列表述。
 [^5]: [obra: verification-before-completion](https://github.com/obra/superpowers/blob/main/skills/verification-before-completion/SKILL.md)（社区权威，2026）：没有新鲜的验证证据就不允许声称完成。
 [^6]: [Medium @waleedk: fixloops](https://waleedk.medium.com/getting-out-of-the-cycle-fixloops-make-ai-codevelopment-more-productive-33d2e40e0e1f)（社区方法论，2025-12）：原文建议"最多试 5 次，然后停下报告学到了什么"。5 次是社区建议值，未见官方确证。
+[^7]: [Quoting Linus Torvalds — Simon Willison's Weblog](https://simonwillison.net/2026/Aug/22/linus-torvalds/)（实践者引述，2026-08-22 核实）：引自内核 commit `drm/xe: Don't hand out the flat CCS storage as usable VRAM`，Linus 原文「the AI several times stated flat out that this was impossible and unsolvable and that we should just write a report about it… But while the AI was ready to give up several times, it did keep adding debug code and analyzing it faithfully when I pushed」。**这是单个案例的叙述，不是可复现的测量**，本篇只用它支撑「AI 宣称放弃不构成停手依据」这一条，不据此推断放弃的发生频率。
 
 ---
 

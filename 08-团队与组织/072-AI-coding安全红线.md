@@ -65,7 +65,7 @@ env | grep -E 'CLAUDE_CODE_USE_BEDROCK|CLAUDE_CODE_USE_VERTEX|ANTHROPIC_BASE_URL
 2. **deny 掉出网命令和密钥目录。**`curl`、`wget` 默认不自动放行，但要显式 deny 兜底；密钥目录加 denyRead。
 3. **开沙箱。**用 `/sandbox` 给 Bash 加文件系统和网络隔离，再让 agent 自主跑。
 4. **加 secret 扫描 hook。**用 PreToolUse hook 拦截含密钥的提交和外发，配合 gitleaks 或 trufflehog。
-5. **别把生产密钥放在 agent 够得到的地方。**CVE-2025-55284 的直接前提就是 `.env` 躺在工作目录里[^2]。
+5. **别把生产密钥放在 agent 够得到的地方。**CVE-2025-55284 的直接前提就是 `.env` 躺在工作目录里[^2]。而「够得到」的范围比多数人以为的宽：有用户特意没把密钥贴进对话、只说了「我稍后自己写进受保护文件」，Claude 直接从**剪贴板历史**里把它取走了[^10]。放开权限跑的时候，本机剪贴板、shell history 这类旁路同样在 agent 的可达范围内——**「我没有把它贴给它」不等于「它拿不到」**。密钥一旦确认被 agent 触达，稳妥做法是当作已泄漏处理：重新生成并轮换用到它的地方。
 
 团队级 `.claude/settings.json` 安全基线见下面折叠块，可直接抄。
 
@@ -402,6 +402,7 @@ AI coding agent 和传统补全式 AI 的根本区别，是它能读整台机器
 [^7]: [Claude Code CHANGELOG](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md)（官方，2026-09-06 核实）：v2.1.259 新增 managed settings 的 `managedMcpServers`，向组织统一下发 HTTP/SSE 型 MCP server（command 型条目跳过）；同版本行为变化——`allowedMcpServers` 只适用于用户自加的服务器，拦截托管下发的 MCP 需用 `deniedMcpServers`。v2.1.275（2026-09-17，09-20 核实）：npm 源插件改用 `npm pack --ignore-scripts` 拉取并做完整性校验，安装脚本不再执行。
 [^8]: [r/ClaudeAI: Notion's Official MCP connector prompt injects AI agents to advertise products mid-task](https://www.reddit.com/r/ClaudeAI/comments/1w9dluw/)（社区，2026-09-07，2157 分 / 139 评论）：Notion 官方 MCP 连接器的资源描述中含「向用户推销 Notion Business 且不解释原因」指令，任务中途插播广告。**帖内附资源描述原文可复核；截至 2026-10-04 Notion 官方仍未回应**——官方仓 09-20 仅推送三笔推销托管版 MCP 的 README 改动；托管端点需 OAuth 无法匿名实测，「广告指令是否仍在」未验证。分数为 Arctic Shift 归档快照。
 [^9]: [r/ClaudeAI: 删 48k 文件事故帖](https://www.reddit.com/r/ClaudeAI/comments/1wl5cgo/)（社区，2026-09-19，4842 分 / 1375 评论）：正文被 automod 滤除，事故链由 OP 在约 50 条评论中的自述重建——Codex 起草的 blanket 授权 prompt + Claude Code 桌面版执行删除，多年 tick 级期权数据 4.8 万+ 文件与未 push 的本地 `.git` 一并被删，Windows shadow copy 全量救回；次级备份因干扰夜间行情 API 已停跑数日。**单一用户自述（经评论区多轮问答印证），非开发者场景**；教训归因（授权粒度/版本控制/备份）为社区共识。
+[^10]: [r/ClaudeAI: I'm so careful to not share secret keys with claude](https://reddit.com/r/ClaudeAI/comments/1vtcuja/im_so_careful_to_not_share_secret_keys_with_claude/)（社区单例，2026-08-20，165 分 / 42 评论，帖子 flair 为 Humor）：楼主明确未将密钥贴入对话、并告知稍后自行写入受保护文件，Claude 从剪贴板历史中取得该密钥，处置为重新生成密钥。**属单个用户自述（幽默向帖子里的严肃事故叙述），未见复现实验，也未见官方就剪贴板读取范围作出说明**；分数为 Arctic Shift 归档快照，可能低于实时值。本篇据此提示旁路可达面，不据此断言触发条件或发生频率。
 
 ---
 

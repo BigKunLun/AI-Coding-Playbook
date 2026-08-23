@@ -31,9 +31,9 @@ flowchart TD
 
 三档路由，从默认往上升级。
 
-**第 1 步：把默认设成 Sonnet，不是 Opus。** 在 `/config` 里设默认模型，或用 `/model sonnet`（v2.1.153 及以后会把它存为新会话默认[^5]）。日常编码、能描述清楚的改动、上下文里已有代码的问答，全部走 Sonnet。官方原话是 Sonnet 能很好地处理大多数编码任务，且比 Opus 便宜[^1]。
+**第 1 步：把默认设成 Sonnet，不是 Opus。** 在 `/config` 里设默认模型，或用 `/model sonnet`（v2.1.153 及以后会把它存为新会话默认[^5]）。日常编码、能描述清楚的改动、上下文里已有代码的问答，全部走 Sonnet。官方原话是 Sonnet 能很好地处理大多数编码任务，且比 Opus 便宜[^1]。装新机器或给团队铺统一起点，用 `ANTHROPIC_DEFAULT_MODEL=sonnet`（v2.1.236 起）：它只定起点不锁死，你之后用 `/model` 存的选择会盖过它；`ANTHROPIC_MODEL` 则相反，每次启动都拉回自己的值，`/model` 存了也不算[^11]。
 
-**怎么确认生效**：开一个新会话敲 `/model`，选择器顶部显示的当前模型是 Sonnet 而不是 Opus。
+**怎么确认生效**：开一个新会话敲 `/model`，选择器顶部显示的当前模型是 Sonnet 而不是 Opus。走环境变量那条路时，`Default` 行会额外标出 `Set by ANTHROPIC_DEFAULT_MODEL`——没标就是被更高优先级的入口盖住了（`--model` 参数、`ANTHROPIC_MODEL`、settings 里的 `model` 字段、组织默认模型等，完整条件清单见脚注[^11]）。
 
 **第 2 步：升 effort 还是升模型，按这两组信号分。** 官方给的诊断问题是：它是「不够努力」还是「不够懂」[^2]。
 
@@ -118,7 +118,7 @@ extended thinking（扩展思考，指让模型在回答前多想一段）产生
 
 </details>
 
-「关键节点才上强模型」如今有了官方内置形态：settings 的 `advisorModel`（官方示例即 `{"advisorModel": "opus"}`）会在任务的关键决策点向第二个通常更强的模型咨询，主力模型照常干活[^9]。默认不开启，`--advisor` 可单会话启用，`CLAUDE_CODE_DISABLE_ADVISOR_TOOL` 可整体关死；官方要求 advisor 至少与主力模型同档。社区的同题解法还有「按任务选模型、永远不按轮降级」——中途把当前会话换成小模型只省输出 token，每轮仍全量重发上下文，弱模型读一段它没参与构建的大上下文必然跑偏；要省就开子代理换模型，或让当前会话写完 handoff 再开新会话[^10]。另有一条不易发现的缓存差异：Opus / Sonnet 改 effort 不重建 prompt cache，**Fable 改 effort 会整个重建**——在 Fable 上做自动档位切换的工具要把它关掉[^10]。
+「关键节点才上强模型」如今有了官方内置形态：settings 的 `advisorModel`（官方示例即 `{"advisorModel": "opus"}`）会在任务的关键决策点向第二个通常更强的模型咨询，主力模型照常干活[^9]。默认不开启，`--advisor` 可单会话启用，`CLAUDE_CODE_DISABLE_ADVISOR_TOOL` 可整体关死；官方要求 advisor 至少与主力模型同档。社区的同题解法还有「按任务选模型、永远不按轮降级」——中途把当前会话换成小模型只省输出 token，每轮仍全量重发上下文，弱模型读一段它没参与构建的大上下文必然跑偏；要省就开子代理换模型，或让当前会话写完 handoff 再开新会话[^10]。另有一条**存疑**的缓存差异：社区 mod 作者观察 Opus / Sonnet 改 effort 不重建 prompt cache、**Fable 改 effort 会整个重建**——但官方 CHANGELOG v2.1.260 明写 Fable 5.1 中途改 effort 已不再使缓存失效，两者方向相反、未经实测裁决；在 Fable 上做自动档位切换的工具，稳妥做法仍是盯 `/usage` 确认缓存没被打爆[^10]。
 
 ## 为什么
 
@@ -197,7 +197,8 @@ extended thinking（扩展思考，指让模型在回答前多想一段）产生
 [^7]: [Manage costs effectively — Claude Code Docs](https://code.claude.com/docs/en/costs)（官方，核实于 2026-08-15）：思考 token 按 output token 计费，默认预算随模型不同、每个请求可达数万 token（tens of thousands of tokens per request depending on the model）。
 [^8]: [Pricing — Claude Platform Docs](https://platform.claude.com/docs/en/about-claude/pricing)（官方，2026-08-15 核实）原文：「Claude 4.7 and later models and Claude Mythos Preview use a newer tokenizer… This tokenizer produces approximately 30% more tokens for the same text. The exact increase depends on the content and workload shape. Claude Sonnet 4.6 and earlier models use the previous tokenizer.」同页确认 Fable 5 为 $10/$50、Opus 5 为 $5/$25、Sonnet 5 为 $2/$10、Haiku 4.5 为 $1/$5。
 [^9]: [Settings reference — advisorModel](https://code.claude.com/docs/en/settings-reference) 与 [Advisor — Claude Code Docs](https://code.claude.com/docs/en/advisor)（官方，2026-10-18 核实）：键名 `advisorModel`（官方示例 `{"advisorModel": "opus"}`），server-side advisor tool 在任务关键节点向第二个通常更强的模型咨询；默认 unset 关闭，`--advisor` 单会话启用，`CLAUDE_CODE_DISABLE_ADVISOR_TOOL` 关死；官方要求 advisor 至少与主力模型同档。**注意官方内部口径不一致**：advisor 专页写 Claude Platform on AWS 不可用，CHANGELOG v2.1.300 却写已在该平台新增——以实际运行为准。
-[^10]: [r/ClaudeAI: 降级模型总搞坏 session（顶评）](https://www.reddit.com/r/ClaudeAI/comments/1wwuw19/)（社区顶评 12 赞，2026-10-03 尾部二次确认）：按任务选模型、别按轮降级——中途换小模型只省输出、每轮仍全量重发上下文。Fable 改 effort 会重建 prompt cache（Opus/Sonnet 不会）出自 [effortless mod 帖](https://www.reddit.com/r/ClaudeAI/comments/1x1nnkn/)（255 分 / 73 评论，2026-10-09）——**单一 mod 作者的机制观察，未见官方文档确认**。
+[^10]: [r/ClaudeAI: 降级模型总搞坏 session（顶评）](https://www.reddit.com/r/ClaudeAI/comments/1wwuw19/)（社区顶评 12 赞，2026-10-03 尾部二次确认）：按任务选模型、别按轮降级——中途换小模型只省输出、每轮仍全量重发上下文。Fable 改 effort 会重建 prompt cache（Opus/Sonnet 不会）出自 [effortless mod 帖](https://www.reddit.com/r/ClaudeAI/comments/1x1nnkn/)（255 分 / 73 评论，2026-10-09）——**单一 mod 作者的机制观察，且与官方记录方向相反**：CHANGELOG v2.1.260 明文「Improved /effort on Claude Fable 5.1 so changing effort mid-session no longer invalidates the prompt cache」。两者可能分别成立（CLI 的 `/effort` 与 mod 走的 API 顶层 effort 参数路径不同），未实测裁决前按「存疑、改档前先看 `/usage`」对待。
+[^11]: [Model configuration — Claude Code Docs](https://code.claude.com/docs/en/model-config)（官方，2026-08-23 核实）：`ANTHROPIC_DEFAULT_MODEL` 需 v2.1.236 及以后，原文「A choice you save with `/model` takes precedence over the variable on later launches too. With `ANTHROPIC_MODEL` set instead, Claude Code returns to that variable's model on the next launch, whatever you saved with `/model`」；仅当 `--model` 参数、`ANTHROPIC_MODEL`、任何 settings 文件里的 `model` 值、组织默认模型都没选定模型时才生效，生效时 `/model` 选择器的 `Default` 行显示 `Set by ANTHROPIC_DEFAULT_MODEL`。
 
 ---
 
