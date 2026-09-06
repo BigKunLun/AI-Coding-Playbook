@@ -124,6 +124,7 @@ npm 装的话是 `npm install -g @anthropic-ai/claude-code@<版本>`。
 - **默认值随模型不同**。支持 effort 的模型默认是 `high`，但 Opus 4.7 默认 `xhigh`[^3]。切模型时 effort 跟着变——你没动任何配置，行为却变了。
 - **级别不跨模型可比**。同一个名字在不同模型上代表的实际值不同；模型不支持你设的级别时会落到它支持的最高档（`xhigh` 在 Opus 4.6 上跑成 `high`）。
 - **prompt 里写 `ultrathink` 只是加一条上下文指令**，发给 API 的 effort 级别不变；`think hard` / `think more` 这类说法完全不是关键词，就是普通文本[^3]。别把它当算力开关。
+- **effort 的显示口径本身有官方侧噪声**。Claude Code 团队工程师 2026-08-22 公开承认：官方会在 Claude Code 内 A/B 测试 API serving configs，当时正在跑的一个实验对数值 effort 做了不同映射——所以模型可能自称 effort 是「10」（high 档），这不是 0–100 刻度、数字本身无意义；官方同时坚称「你选的 effort 就是你拿到的 effort」、深评确认不影响模型性能[^5]。对照实验读 effort 这个量时记住：它偶发的怪数字更可能是官方实验的显示口径，不是你被降档——但「选中即所得」目前也只有官方单方表态。
 
 会话内可用的相关命令：`/model` 看当前模型和 effort，`/effort` 直接设级别（`/effort auto` 恢复模型默认），`/status` 看账号与上下文，`/feedback` 提报。
 
@@ -209,6 +210,7 @@ npm 装的话是 `npm install -g @anthropic-ai/claude-code@<版本>`。
 [^2]: [Advanced setup — Claude Code Docs](https://code.claude.com/docs/en/setup)（官方，2026-08-15 访问）：`autoUpdatesChannel` 与 `minimumVersion` 的语义、指定版本安装、`DISABLE_AUTOUPDATER` 与 `DISABLE_UPDATES` 的区别。
 [^3]: [Model configuration — Claude Code Docs](https://code.claude.com/docs/en/model-config)（官方，2026-08-15 访问）：effort 取值范围、各模型默认档与降档规则、设置优先级、非交互模式行为、`ultrathink` 关键字语义。
 [^4]: [A postmortem of three recent issues](https://www.anthropic.com/engineering/a-postmortem-of-three-recent-issues)（官方，2025-09）：2025-08-31 最差时段约 16% 的 Sonnet 4 请求受影响。
+[^5]: [HN 49404033（Thariq，Claude Code 团队）](https://news.ycombinator.com/item?id=49404033)（官方工程师公开表态，2026-08-22；[原始推文](https://x.com/trq212/status/2091247114869432543)）：原话「We sometimes test API serving configs in Claude Code before rolling them out, and one running now maps the numerical effort value differently... The scale isn't 0-100, the number isn't meaningful on its own, and the effort you selected is the effort you're getting. We've run in-depth evals to confirm this doesn't affect model performance.」。「不影响性能」为官方单方表态，未见独立复现实验证实或证伪。
 
 ---
 

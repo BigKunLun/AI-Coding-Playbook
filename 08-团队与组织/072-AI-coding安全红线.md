@@ -159,7 +159,7 @@ grep -rn "postinstall\|prepare\|preinstall" repo/package.json 2>/dev/null
 1. **用 managed settings 全员强制，而不是写进 CLAUDE.md 建议。**CLAUDE.md 是上下文不是配置，可被忽略（见 [#010](../02-上下文工程/010-CLAUDE-md怎么写才生效.md)）。
 2. **写死红线清单。**禁止把生产密钥、客户 PII、未脱敏数据喂进任何 AI 工具；禁止用个人消费账号跑公司代码。
 3. **审计与监控。**用 `ConfigChange` hook 拦会话内改配置，用 OpenTelemetry 监控用量与异常（见 [#071](./071-AI-coding效能怎么度量.md)）。
-4. **MCP 白名单。**官方明确不对任何 MCP server 做安全审计[^4]，所以 MCP 清单要入 git，只用自己写的或可信来源的。
+4. **MCP 白名单。**官方明确不对任何 MCP server 做安全审计[^4]，所以 MCP 清单要入 git，只用自己写的或可信来源的。v2.1.259 起白名单多了一个组织级抓手：managed settings 支持 `managedMcpServers` 向全员统一下发 HTTP/SSE 型 MCP server（结构同 `.mcp.json`，command 型条目会跳过）[^7]——「入 git 的约定」由此可升级为「IT 统一交付的配置」。注意配套语义：`allowedMcpServers` 只管用户自加的服务器，拦截组织下发的托管 MCP 要用 `deniedMcpServers`。
 
 MCP server 不是提示词，它是工具入口——本地 stdio server 本质上就是一个跑在你机器上的进程。装之前审四项（来源、command、scope、auth），别只看名字，名字最容易伪装。
 
@@ -399,6 +399,7 @@ AI coding agent 和传统补全式 AI 的根本区别，是它能读整台机器
 [^4]: [Claude Code Security — Claude Code Docs](https://code.claude.com/docs/en/security)（官方，2026-07）：Anthropic 不对任何 MCP server 做安全审计。
 [^5]: [MCP Security Best Practices](https://modelcontextprotocol.io/docs/tutorials/security/security_best_practices)、[OWASP: MCP Tool Poisoning](https://owasp.org/www-community/attacks/MCP_Tool_Poisoning)、[Invariant Labs: MCP Tool Poisoning Attacks](https://invariantlabs.ai/blog/mcp-security-notification-tool-poisoning-attacks) 与 [Claude Code Skills](https://code.claude.com/docs/en/skills)（官方与社区安全研究，个人研究整理于 2026-07）：来自不可信来源的本地 stdio MCP server 可导致任意代码执行与数据外泄；工具响应与工具描述都能夹带隐藏指令，界面展示的信息可能少于模型看到的；Skill 可包含脚本、可在发送给模型前执行 shell 命令替换输出、可通过 `allowed-tools` 预授权工具，项目 skill 在 workspace trust 后生效。
 [^6]: [Post-mortem: unauthorized Cline CLI npm publish](https://cline.ghost.io/post-mortem-unauthorized-cline-cli-npm/)（厂商官方 post-mortem，事件 2026-02-17）：`cline@2.3.0` 由受损的 npm publish token 发布，新增 `postinstall` 全局安装外部包；triage 与 release workflow 共享 Actions cache 属可行链路而非已确认的唯一路径；整改含移除 AI triage workflow、轮换凭据、迁移 npm OIDC provenance。
+[^7]: [Claude Code CHANGELOG](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md)（官方，2026-09-06 核实）：v2.1.259 新增 managed settings 的 `managedMcpServers`，向组织统一下发 HTTP/SSE 型 MCP server（command 型条目跳过）；同版本行为变化——`allowedMcpServers` 只适用于用户自加的服务器，拦截托管下发的 MCP 需用 `deniedMcpServers`。
 
 ---
 

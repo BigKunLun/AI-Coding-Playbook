@@ -61,7 +61,7 @@ flowchart TD
 
 **6. prompt 写具体。** "improve this codebase" 会触发全库扫描；"add input validation to the login function in auth.ts" 让它读最少的文件就开工。改动前先用 plan mode（连按两次 `Shift+Tab`）探一探，避免走错方向后的昂贵返工。
 
-**7. 大输出操作丢给 subagent，或用 hook 先过滤。** 跑测试、抓文档、处理日志这类活交给 subagent，冗长内容留在子上下文，只把摘要回给主上下文。也可以用 PreToolUse hook 在命令执行前改写它（见下面的折叠块）。
+**7. 大输出操作丢给 subagent，或用 hook 先过滤。** 跑测试、抓文档、处理日志这类活交给 subagent，冗长内容留在子上下文，只把摘要回给主上下文。也可以用 PreToolUse hook 在命令执行前改写它（见下面的折叠块）。这套 hook 思路的工业级版本：Spotify 工程团队用 PreToolUse hook 拦截超长文件读取（>350 行）和样板代码生成，改派给一个廉价 worker 模型（示例用 Gemini 2.5 Flash）处理，原始内容不进主模型上下文、只回结构化摘要，实测主链路 token 省约 90%[^9]——「贵模型只看摘要、便宜模型啃原文」在本篇第 6 条之外又多了一个可抄的自动化形态。
 
 **8. 调低 extended thinking。** thinking token 按 output 价计费，默认预算每请求可达数万[^7]。用 `/effort` 降级、`/config` 关掉思考（Fable 5 不支持关闭），或设 `MAX_THINKING_TOKENS=8000`（只对固定思考预算的模型生效，自适应推理模型用 `/effort` 调档）。
 
@@ -214,6 +214,7 @@ CLAUDE.md 在会话启动时就载入上下文。如果里面塞了专项工作�
 [^6]: 个人研究（2026-06，跨工具痕迹采集可行性评估）：Claude Code 本地 jsonl 里的 token 数被系统性少算 1–2 个数量级，只能看趋势、不能当绝对值。未见官方对该偏差的确证说明。
 [^7]: [Manage costs effectively — Claude Code Docs](https://code.claude.com/docs/en/costs)（官方，2026-08-15 核实）：MCP 工具定义默认延迟加载（deferred by default，仅工具名进上下文）；官方原文建议优先用 `gh`、`aws`、`gcloud` 等 CLI；thinking token 按 output 计费、默认预算依模型可达每请求数万，`/effort` 与 `MAX_THINKING_TOKENS=8000` 均见原文；`/usage` 的归因与 `d`/`w` 视图切换同页。
 [^8]: [Discover and install prebuilt plugins — Claude Code Docs](https://code.claude.com/docs/en/discover-plugins)（官方，2026-08-15 核实）：code intelligence 插件清单（`typescript-lsp`、`pyright-lsp`、`gopls-lsp`、`rust-analyzer-lsp` 等）、需自装语言服务器二进制、安装命令与诊断行为。
+[^9]: [Portal by Spotify cut my Claude Code token usage by 90% — Spotify Engineering](https://engineering.atspotify.com/2026/9/portal-by-spotify-cut-my-claude-code-token-usage-by-90)（厂商工程博客，2026-09-04；[HN 讨论](https://news.ycombinator.com/item?id=49571465) 260 分）：PreToolUse hook 拦截超 350 行的文件读取与样板生成，改派廉价 worker 模型处理，原始内容不进主模型上下文、只回结构化摘要，作者实测个人链路 token 省约 90%。**单人实测数字，未经第三方复核**；hook 改写命令本身是官方支持的机制（见第 7 条折叠块的官方示例）。
 
 ---
 

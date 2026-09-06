@@ -66,6 +66,8 @@ flowchart TD
 
 不通过时的回退规则：方向错了回 ②，只是实现没到位回 ③。
 
+这个循环如今有了官方同构背书：Anthropic Applied AI 团队 2026-08-21 发布的 AI-native SDLC playbook 把生命周期定为六个阶段，每阶段以一份**提交进版本库的 markdown 产物**收口（intent.md / spec.md / plan.md / PR / incident record），逐行人审替换为 agent review 加部署闸门，人的批准点是各阶段的 gate[^7]——与本篇的 SPEC→PLAN→闸门→REVIEW 是同一套结构，可当作官方版的完整参照。
+
 ### Phase ①：让 agent 访谈你，别自己憋文档
 
 最容易被跳过、也最贵的一步。官方推荐的姿势是反过来 —— 让 agent 主动问你。
@@ -353,6 +355,7 @@ Anthropic 最佳实践里有一个独立小节叫「Explore first, then plan, th
 [^4]: [Best practices for Claude Code](https://code.claude.com/docs/en/best-practices)（官方，2026-08 核实）：被要求找缺口的 reviewer 通常会报出一些，即使工作本身没问题；追着每条 finding 改会导致过度设计。
 [^5]: [CC Docs: Permission modes](https://code.claude.com/docs/en/permission-modes)（官方，2026-08-15 复核）：`useAutoModeDuringPlan` 默认为开（原文「which it is by default」），开启时规划阶段的 shell 命令交由分类器审而不再弹窗；同页注明 Pro / Max / Team 计划的内置起始权限档为 auto（原文「On Pro, Max, and Team plans, the built-in starting mode is auto mode」，需 CLI v2.1.228+）。此前草稿引用的「2026-08-14 起生效」具体日期在当前官方页面已不可见，本文不再采用。
 [^6]: [Keep Claude working toward a goal — Claude Code Docs](https://code.claude.com/docs/en/goal)（官方，2026-08-15 核实）：`/goal` 把你给的条件设为会话终止条件，每轮结束由一个独立的小模型评估器对照全量对话判断是否达成，未达成则把原因注入下一轮继续做。
+[^7]: [The AI-Native SDLC Playbook — Claude Academy](https://academy.claude.com/courses/ai-native-sdlc-playbook)（官方，Anthropic Applied AI 团队，2026-08-21）：六阶段（Plan → Design → Build → Test → Deploy → Maintain）每阶段以提交进版本库的 markdown 产物收口（intent.md / spec.md / plan.md / PR / incident record），逐行人审替换为 agent review + evals + 部署闸门，人的批准点是各阶段 gate。
 
 ---
 

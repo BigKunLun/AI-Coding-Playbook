@@ -95,6 +95,8 @@ Managed 有三种交付方式（远程下发、MDM 策略、本地文件），**
 
 </details>
 
+**官方也在持续给「字面匹配」堵漏，升级本身就是安全修复。** v2.1.259 修复了一批 Read() 拒绝规则的已知绕过口：deny 的文件作为命令选项值传入、作为 `git diff` / `git grep` 的操作数、经 `cd DIR && cat FILE` 复合命令读出，以及对含敏感文件目录的递归 `grep` / `cp`（后者现在会先询问）[^11]。这些正是本篇讲的「命令形态伪装」——它们在旧版本里真实有效，官方逐个堵上恰恰说明 deny 的字面匹配本质从未变过，三层叠加仍是结论。
+
 **怎么确认做到位**：重启会话，让它执行一条你期望被拦的命令（比如「运行 `/bin/rm -rf ./tmp-test`」）。**看到明确的拒绝提示才算过；只是弹窗询问，说明落到了 `ask` 而不是 `deny`。**
 
 ### 第 3 步：不可逆的动作，放进 PreToolUse hook
@@ -176,7 +178,7 @@ echo '{"tool_input":{"command":"npm test"}}'       | .claude/hooks/guard.sh; ech
 
 ### 第 4 步：要「进程级别真的做不到」，开 sandbox
 
-hook 和 deny 规则都停在「Claude 发出的命令串」这一层。一旦命令跑起来、它干的事比名字多（`npm run build` 里藏了删除、脚本自己 `os.remove()`），只有操作系统层拦得住。会话里跑 `/sandbox` 打开面板选模式，配置写进 `.claude/settings.local.json`。**怎么确认做到位**：开启后让 Claude 执行 `touch ~/sandbox-test-file`，应当失败（写入工作目录之外）；再执行 `cat ~/.aws/credentials`，配了 `credentials` 段之后应当读不到。
+hook 和 deny 规则都停在「Claude 发出的命令串」这一层。一旦命令跑起来、它干的事比名字多（`npm run build` 里藏了删除、脚本自己 `os.remove()`），只有操作系统层拦得住。会话里跑 `/sandbox` 打开面板选模式，配置写进 `.claude/settings.local.json`。一次性场景另有 v2.1.248 起的声明式开关 `--restricted`（或 `CLAUDE_CODE_RESTRICTED=1`）：移除内置命令执行与代码执行工具、WebFetch 需显式点名、文件操作限制在工作目录内、禁止跳过权限确认——相当于把三层预先收成一套保守预设，代价是很多正常活也干不了，适合「这次只许它读」的窄任务，不是日常档。**怎么确认做到位**：开启后让 Claude 执行 `touch ~/sandbox-test-file`，应当失败（写入工作目录之外）；再执行 `cat ~/.aws/credentials`，配了 `credentials` 段之后应当读不到。
 
 ### 第 5 步：团队场景，用 managed settings 焊死
 
@@ -390,6 +392,7 @@ Read / Edit 的 deny 规则边界一样，官方带 Warning 标注：它们作�
 [^8]: 两份证据，方向一致但口径不同。**① 官方**：[Auto mode is now the default in Claude Code](https://claude.com/blog/auto-mode-default-in-claude-code)（Anthropic，2026-08-07，2026-08-15 核实）—— 遥测显示用户批准 97% 的权限弹窗；付费专业测试者的对照研究共投放 1053 次危险命令，人工审查捕获 13.6%（143/1053），auto mode 分类器拦下 89%（937/1053）。这是本条的主要依据，但需注意它是 Anthropic 为论证自家默认档变更而公布的数据，非独立审计。**② 社区**：公开实验（HN 49195468，2026-08-06，339 分，数据详情见其链接的 scalex.dev 博客），约 4 万次游戏、40.9 万次放行/拦截决策，人工审批平均准确率 66.3%，外泄类威胁漏 33.4%、越权访问密钥漏 35%，伪装成日常命令的（如 `npm run analyze`）64.7% 被批准，漏判率随会话推进上升。样本大但为游戏化环境下的自愿参与者，未见官方或同行评审确证。两者绝对值差距很大（13.6% vs 66.3%），因任务难度与判定口径不同不可直接比较，共同成立的只有方向：**人眼审批的漏判率高到不能当边界用**。
 [^9]: [CC Docs: Permission modes](https://code.claude.com/docs/en/permission-modes)（官方，2026-08-15 核实）现行表述：「On Pro, Max, and Team plans, the built-in starting mode is auto mode.」内置 auto 默认需 v2.1.228 及以上（原生 Windows 需 v2.1.233）；自设的 `defaultMode` 与组织托管的默认档不受影响；`permissions.disableAutoMode: "disable"` 可整体移除该档（从 Shift+Tab 循环里消失，`--permission-mode auto` 也会落回 Manual）。「2026-08-14 起生效」的时点出自官方博客（见 [^8]①）。
 [^10]: [Claude Code CHANGELOG](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md)（官方，2026-08-15 核实）：v2.1.208 条目「Catastrophic removals (e.g. `rm -rf ~`) in commands containing `$(…)`/backticks/`<(…)` now prompt in `--dangerously-skip-permissions` and auto mode, matching the plain form」——裸写形式的熔断更早即有（v2.1.126 的条目已把它当作既有安全网提及），确切引入版本未在 changelog 中查到；v2.1.210 新增对 `Write(path)` / `NotebookEdit(path)` / `Glob(path)` 规则的启动告警；v2.1.216 新增 `sandbox.filesystem.disabled`。Read deny 连带拦 Edit（v2.1.208 起）/ Write（v2.1.228 起）与 `filesystem.disabled` 关掉后哪些保护失效，见 [Configure permissions](https://code.claude.com/docs/en/permissions) 与 [Sandboxing](https://code.claude.com/docs/en/sandboxing) 官方页（2026-08-15 核实）。
+[^11]: [Claude Code CHANGELOG](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md)（官方，2026-09-06 核实）：v2.1.259 修复 Bash Read() 拒绝规则的多个绕过口——deny 的文件作为命令选项值传入、作为 `git diff` / `git grep` 的操作数、经 `cd DIR && cat FILE` 复合命令读出，对含敏感文件的目录递归 `grep` / `cp` 现在会先询问；v2.1.248 新增 `--restricted` / `CLAUDE_CODE_RESTRICTED=1` 受限模式（移除内置命令执行与代码执行工具、WebFetch 需显式点名、文件操作限工作目录内、禁止跳过权限确认）。
 
 ---
 

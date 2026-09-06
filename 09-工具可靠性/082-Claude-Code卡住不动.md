@@ -52,7 +52,7 @@ flowchart TD
 claude --resume
 ```
 
-官方对这一段的说法是：先 Ctrl+C 尝试取消，仍无响应就关终端重启，**重启不会丢对话**，在同一目录跑 `claude --resume` 就能接回来[^1]。
+官方对这一段的说法是：先 Ctrl+C 尝试取消，仍无响应就关终端重启，**重启不会丢对话**，在同一目录跑 `claude --resume` 就能接回来[^1]。但接得回来有个前提：本地会话记录还在。Claude Code 会按 `cleanupPeriodDays`（默认 30 天）清理本地历史，且是**静默删除**——没有回收站、没有提示，超期的会话直接从 `--resume` 列表里消失。要长期可追溯就把 `cleanupPeriodDays` 调大（如 3650），真正重要的会话导出另存[^6]。
 
 **怎么确认做到位**：`claude --resume` 列出会话列表，选中后能看到你刚才那轮的历史对话。看得到历史 = 上下文没丢。
 
@@ -228,6 +228,7 @@ bash 那边：`BASH_DEFAULT_TIMEOUT_MS` 默认 120000 毫秒（2 分钟），`BA
 [^3]: [GH #26224](https://github.com/anthropics/claude-code/issues/26224)（社区，2026-02 起，Anthropic 有置顶回复确认在查）：卡在 thinking 5–20 分钟、token 用量不增长。
 [^4]: [Environment variables — Claude Code Docs](https://code.claude.com/docs/en/env-vars)（官方，核实于 2026-08）：`BASH_DEFAULT_TIMEOUT_MS` 默认 120000、`BASH_MAX_TIMEOUT_MS` 默认 600000。
 [^5]: [Error reference — Claude Code Docs](https://code.claude.com/docs/en/errors)（官方，核实于 2026-08-15）：`CLAUDE_CODE_MAX_RETRIES` 默认 10，v2.1.186 起上限 15；v2.1.199 起设置 `CLAUDE_CODE_RETRY_WATCHDOG` 会移除该上限，并对 429/529 无限重试（原文用词为 indefinitely）。
+[^6]: [r/ClaudeAI: Claude Code silently deletes local history older than 30 days](https://www.reddit.com/r/ClaudeAI/comments/1w1wc0u/psa_claude_code_silently_deletes_local_history/)（社区 PSA，2026-08-29，121 分 / 61 评论）：默认启动时静默永久删除 30 天前的本地会话记录，无回收站无提示，附精确复现与一键修复（settings 里 `cleanupPeriodDays` 调大），对应 GitHub issue #59248 / #62476 / #64999。该机制与 [#052](../06-工程协作/052-别让AI搞乱git仓库.md) 脚注所记「checkpoint 随 session 在 `cleanupPeriodDays` 天后删除」是同一开关的两面——那篇管 checkpoint，本条管 `--resume` 依赖的会话记录本身。**社区 PSA + 官方 issue 佐证，「静默」的体验口径来自用户自述**。
 
 ---
 

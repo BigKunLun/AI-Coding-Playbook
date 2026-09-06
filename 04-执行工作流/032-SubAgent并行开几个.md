@@ -46,7 +46,7 @@ flowchart TD
 
 </details>
 
-**硬红线一：不要让多个并行 SubAgent 改同一批文件。** 它们看不到彼此的中间状态，只能各写各的，后写的覆盖先写的。真需要并行改同一个仓库，给每个 SubAgent 加 `isolation: worktree`（frontmatter 字段，让它在临时 git worktree 里拿一份独立仓库副本），或者干脆串行。
+**硬红线一：不要让多个并行 SubAgent 改同一批文件。** 它们看不到彼此的中间状态，只能各写各的，后写的覆盖先写的。真需要并行改同一个仓库，给每个 SubAgent 加 `isolation: worktree`（frontmatter 字段，让它在临时 git worktree 里拿一份独立仓库副本），或者干脆串行。这条现在有了官方侧实证：Anthropic Frontier Red Team 对多 agent 协作的模拟研究里，向共享文件并行提交的一组 PR 大量互相冲突、冲突后**直接被放弃**（"the PRs often conflicted with one-another, at which point they were then abandoned"）；更新的模型（Opus 4.8、Mythos Preview）看似「解决」了这个问题，实际是几乎不再协作[^6]。
 
 **硬红线二：别让 SubAgent 自己再派活。** 内置的 `general-purpose` 拿的是全工具集，里面就包含派活工具本身，于是它能再派、子 agent 还能再派，形成没有深度上限也没有总数上限的扇出树。掐断办法是自定义 agent 时用 `tools` 白名单显式列出它需要的工具，而不是省略 `tools` 让它继承全部 —— 比如调研型 agent 写 `tools: Read, Grep, Glob, WebFetch` 就够了。
 
@@ -162,7 +162,7 @@ model: inherit
 3. 按优先级输出：Critical / Warning / Suggestion
 ```
 
-存放位置两级：项目级 `.claude/agents/`（进版本控制、团队共享），用户级 `~/.claude/agents/`（跨项目可用）。`tools` 是白名单，省略则继承全部工具；`disallowedTools` 是黑名单；两个都写时先扣黑名单再解析白名单。写 `model: haiku` 可以把便宜的任务路由到快模型；想全局统一就设 `CLAUDE_CODE_SUBAGENT_MODEL`。
+存放位置两级：项目级 `.claude/agents/`（进版本控制、团队共享），用户级 `~/.claude/agents/`（跨项目可用）。`tools` 是白名单，省略则继承全部工具；`disallowedTools` 是黑名单；两个都写时先扣黑名单再解析白名单。写 `model: haiku` 可以把便宜的任务路由到快模型；想全局统一就设 `CLAUDE_CODE_SUBAGENT_MODEL`；v2.1.257 起新增 `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`，连各 agent frontmatter 里写的 `model:` 也一并强制覆盖（统一成本基线时用，注意它也会覆盖你特意给某个 agent 配的贵模型）。
 
 **坑：很多模板写 `tools: Read, Grep, Glob, Bash` 并注释「只读」，这是错的。** `Bash` 能执行任意 shell 命令，agent 完全可以 `echo x > src/app.ts`、`sed -i`、`git checkout .`、`rm`。官方说这套配置「can't edit files, write files」，指的是 Edit / Write 这两个工具不可用，不代表文件系统不可写。
 
@@ -294,7 +294,7 @@ Anthropic 在自家多 Agent 研究系统的复盘里给了最硬的量化：age
 
 代价大有三个结构性原因：**协调复杂度增长快**（早期 agent 会为一个简单查询启动 50 个 SubAgent、无休止地找不存在的来源）；**SubAgent 之间无法共享中间状态**，只能把结果报回主 Agent 再分发，官方称之为「game of telephone」传话游戏，信息多级传递会失真；**同步执行造成瓶颈**，主 Agent 要等 SubAgent 完成才能继续，整个系统可能被一个慢的卡住。
 
-更贵的一类是「你只派了 1 个，它自己长成了几十个」。有用户只发了一句「research Venmo integration options」，最后同时在跑 48 个以上后台 agent，其中大量重复劳动 —— 4 个在查同一个 Wise API、3 个在查同一个 Apple Pay P2P，新 agent 冒出来的速度比他手动停的速度还快，同样情况在不同会话里复现了两次[^3]。同期还有两个同族案例：Agent Teams 带 5 到 8 个队友时，主会话被队友的 idle 通知反复唤醒，13% 到 22% 的输入 token 花在纯粹的「收到」上；deep-research 工作流一次扇出约 75 个并发校验 agent，只要其中任何一个没按 schema 返回结构化输出，整轮直接中止，三次尝试烧掉约 350 万 token、零可用产出。
+更贵的一类是「你只派了 1 个，它自己长成了几十个」。有用户只发了一句「research Venmo integration options」，最后同时在跑 48 个以上后台 agent，其中大量重复劳动 —— 4 个在查同一个 Wise API、3 个在查同一个 Apple Pay P2P，新 agent 冒出来的速度比他手动停的速度还快，同样情况在不同会话里复现了两次[^3]。同期还有两个同族案例：Agent Teams 带 5 到 8 个队友时，主会话被队友的 idle 通知反复唤醒，13% 到 22% 的输入 token 花在纯粹的「收到」上；deep-research 工作流一次扇出约 75 个并发校验 agent，只要其中任何一个没按 schema 返回结构化输出，整轮直接中止，三次尝试烧掉约 350 万 token、零可用产出。**这个问题没有随模型更新消失**：2026-09 有用户用 Fable 5.1 跑一个 5-6 个文件的小型 i18n 审计，两次运行各自扇出恰好 126 个 agent、合计烧掉约 840 万 token，帖内附了两次运行的 workflow id 与 agent/token 数对照，可复现[^7]。
 
 </details>
 
@@ -394,6 +394,8 @@ Anthropic 在自家多 Agent 研究系统的复盘里给了最硬的量化：age
 [^3]: [GitHub Issue #68110](https://github.com/anthropics/claude-code/issues/68110)（社区，2026-06，issue 仍 open）：一句调研请求最终同时跑 48 个以上后台 agent，新 agent 冒出的速度比手动停的速度还快。
 [^4]: [How we built our multi-agent research system](https://www.anthropic.com/engineering/multi-agent-research-system)（官方，2025）：多 Agent 系统在 Anthropic 内部**研究类**评测上比单 Agent Opus 高 90.2%，评测对象是开放式信息搜集，不是编码。
 [^5]: [How we built our multi-agent research system](https://www.anthropic.com/engineering/multi-agent-research-system)（官方，2025）：每个 subagent 都需要目标、输出格式、工具与来源指引、明确的任务边界；缺了就会重复劳动、留下缺口。
+[^6]: [Patterns and problems in emerging multiagent systems — Anthropic Frontier Red Team](https://www.anthropic.com/research/multiagent-systems)（官方研究，2026-08-13）：对多 agent 协作的 12 小时模拟中，向共享文件并行提交的 PR 大量互相冲突、冲突后即被放弃；Opus 4.8 与 Mythos Preview 通过「几乎不再协作」规避了冲突；Sonnet 5 是唯一同时做到高合并率与高代码共享的模型；协调失败的分类为协调、从众、认识论、目标不兼容四类。**研究对象是独立 agent swarm 模拟，不是 Claude Code SubAgent 的原生行为**，引用时须注明语境。
+[^7]: [r/ClaudeAI: Is Claude Fable 5.1 spawning 126 agents for simple tasks](https://www.reddit.com/r/ClaudeAI/comments/1w5agxc/is_claude_fable_51_spawning_126_agents_for_simple/)（社区单例，2026-09-02，28 分 / 48 评论）：5-6 个文件的 i18n 审计两次运行各扇出 126 个 agent、合计约 840 万 token，帖内附 workflow id 与两次运行的对照数据。**单个用户自述，未见他人复现，亦未见官方回应**；分数为 Arctic Shift 归档快照。
 
 ---
 
