@@ -250,6 +250,8 @@ managed settings（企业侧，优先级最高）：
 
 ### 第 6 步：hook 的三个正面用法
 
+先给一个能快速分界的心智模型：**CLAUDE.md 管需要理解的事，hooks 管每次必须发生的事**——格式化、保护文件、前置检查、跑完通知，这类确定性动作靠模型自觉总会有失守的一次，写进 hook 才是每次都发生[^12]。
+
 前五步都在讲「拦住」。hook 还有另一半价值：把「我记得去查」的人工检查变成它每轮必须自己做。这一半不阻断任何东西，风险低，值得先上。
 
 **① Stop hook 做完成度判定，用 `additionalContext` 注入反馈，别用 block。** 老写法返回 `{"decision":"block"}` 逼它继续干，会以「hook 报错」的形式呈现且官方对连续 block 有硬上限；改用 `hookSpecificOutput.additionalContext`，官方明写 Stop 与 SubagentStop 接受它，作为**非报错的反馈**注入并让对话继续[^6]。**怎么确认生效**：`/hooks` 里能看到已加载，让它做个小改动，回答结束后它会多走一轮补测试或明确说「已做完」；看到红色 hook 错误提示就说明你用的还是 `decision: block`。
@@ -393,6 +395,7 @@ Read / Edit 的 deny 规则边界一样，官方带 Warning 标注：它们作�
 [^9]: [CC Docs: Permission modes](https://code.claude.com/docs/en/permission-modes)（官方，2026-08-15 核实）现行表述：「On Pro, Max, and Team plans, the built-in starting mode is auto mode.」内置 auto 默认需 v2.1.228 及以上（原生 Windows 需 v2.1.233）；自设的 `defaultMode` 与组织托管的默认档不受影响；`permissions.disableAutoMode: "disable"` 可整体移除该档（从 Shift+Tab 循环里消失，`--permission-mode auto` 也会落回 Manual）。「2026-08-14 起生效」的时点出自官方博客（见 [^8]①）。
 [^10]: [Claude Code CHANGELOG](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md)（官方，2026-08-15 核实）：v2.1.208 条目「Catastrophic removals (e.g. `rm -rf ~`) in commands containing `$(…)`/backticks/`<(…)` now prompt in `--dangerously-skip-permissions` and auto mode, matching the plain form」——裸写形式的熔断更早即有（v2.1.126 的条目已把它当作既有安全网提及），确切引入版本未在 changelog 中查到；v2.1.210 新增对 `Write(path)` / `NotebookEdit(path)` / `Glob(path)` 规则的启动告警；v2.1.216 新增 `sandbox.filesystem.disabled`。Read deny 连带拦 Edit（v2.1.208 起）/ Write（v2.1.228 起）与 `filesystem.disabled` 关掉后哪些保护失效，见 [Configure permissions](https://code.claude.com/docs/en/permissions) 与 [Sandboxing](https://code.claude.com/docs/en/sandboxing) 官方页（2026-08-15 核实）。
 [^11]: [Claude Code CHANGELOG](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md)（官方，2026-09-06 核实）：v2.1.259 修复 Bash Read() 拒绝规则的多个绕过口——deny 的文件作为命令选项值传入、作为 `git diff` / `git grep` 的操作数、经 `cd DIR && cat FILE` 复合命令读出，对含敏感文件的目录递归 `grep` / `cp` 现在会先询问；v2.1.248 新增 `--restricted` / `CLAUDE_CODE_RESTRICTED=1` 受限模式（移除内置命令执行与代码执行工具、WebFetch 需显式点名、文件操作限工作目录内、禁止跳过权限确认）。
+[^12]: [r/ClaudeAI: One Claude Code feature I was underusing: hooks](https://www.reddit.com/r/ClaudeAI/comments/1w9vof4/)（社区，2026-09-07，307 分 / 65 评论）：心智模型「CLAUDE.md 管需要理解的事，hooks 管每次必须发生的事」，四类必 hook 场景（格式化、保护文件、前置检查、等待通知）。**社区总结的个人实践，与官方 hooks 文档的精神一致但措辞为社区原创**；分数为 Arctic Shift 归档快照。
 
 ---
 

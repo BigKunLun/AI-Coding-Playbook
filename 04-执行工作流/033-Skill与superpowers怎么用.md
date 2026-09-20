@@ -77,6 +77,7 @@ my-skill/
 - **同时写「做什么」和「什么时候用」，并带关键词。** 例：`Extract text and tables from PDF files, fill forms. Use when working with PDFs or when the user mentions PDFs, forms, or document extraction.`
 - **以 `Use when...` 收尾**，聚焦触发条件。
 - **别在 description 里概括流程。** superpowers 实测发现 agent 会把流程摘要当捷径，直接跳过读正文[^4]。反例：`Use for TDD - write test first, watch it fail, write minimal code`；正例：`Use when implementing any feature or bugfix, before writing implementation code`。
+- **正文针对默认坏行为写几条短规则，别罗列方法论名目。** Dan Luu 在 Zstd 实现评测上实测 26 种提示条件/skill（TDD、Lean 4 形式化验证、QuickCheck 等，每条件跑 80–160 次）：几乎全部不优于「不加任何指令」的基线——agent 只会表面合规（空洞的证明、平凡的性质、全走拒绝路径的随机输入）；真正有效的是结构约束（把测试放进独立 crate、AGENTS.md 里限制行为）加上几条针对具体坏行为的短指令[^10]。这和第五步「测它」还有个交叉结论：他实测的多数条件之间成绩差全在噪音范围内，**你给 skill 跑几遍看「感觉好了」不构成评测**，要对照基线、跑够次数。
 
 <details>
 <summary>控制触发行为的常用可选字段（含四种配置模式）</summary>
@@ -376,6 +377,7 @@ skill 不是「又一种 prompt」，而是把人类专家的流程化经验打�
 [^7]: [Extend Claude with skills — Claude Code Docs](https://code.claude.com/docs/en/skills)（官方，2026-08-15 核实）：原文明写 "enterprise overrides personal, and personal overrides project"，且任一层级的 skill 覆盖同名内置（bundled）skill——skill 的个人层压过项目层，与 settings 的次序相反，是文档明确的特例。
 [^8]: [Extend Claude with skills — Claude Code Docs](https://code.claude.com/docs/en/skills)（官方，2026-08-15 核实）：Run evals with skill-creator 一节，基线对比是在全新会话里分别以「有 skill / 禁用 skill」跑同一批真实 prompt；`skill-creator` 插件（官方 marketplace）把这个循环自动化，含两版 skill 的盲测 A/B。
 [^9]: [CHANGELOG v2.1.7 — anthropics/claude-code](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md)（官方，2026-01，2026-08-15 核实）：Enabled MCP tool search auto mode by default for all users——MCP 工具描述超过上下文窗口 10% 时自动延迟加载，改由 MCPSearch 工具按需发现。
+[^10]: [How well do agents use test/verification techniques? — Dan Luu](https://danluu.com/agentic-testing/)（个人博客实测，2026-09-08，HN 191 分）：Zstd 实现评测上 26 种提示条件/skill（TDD、Lean 4、QuickCheck 等）各跑 80–160 次，几乎全部不优于无指令基线；agent 对点名技术表面合规（空洞证明、平凡性质、拒绝路径随机输入）；有效项为结构约束与短 nudge 规则；多数条件间成绩差在噪音范围。**单人博客的实验设计（自评基准），方法透明但未经同行评审**。
 
 ---
 

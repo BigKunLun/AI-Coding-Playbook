@@ -60,7 +60,7 @@ flowchart TD
 | 记得测试 | 提交前跑 `npm test` —— 看有没有测试输出 |
 | 保持文件整洁 | API handler 放 `src/api/handlers/` —— 看新文件落在哪 |
 
-按这个标准，「你是一个资深工程师」「请一步一步思考」这类人格与思维方式指令一条都验证不了，占着常驻预算却看不出有没有生效，直接删。内容上只放三类「每次都适用」的东西：技术栈和目录结构（是什么）、项目目的（为什么）、构建/测试/验证命令与工作流约定（怎么做）。
+按这个标准，「你是一个资深工程师」「请一步一步思考」这类人格与思维方式指令一条都验证不了，占着常驻预算却看不出有没有生效，直接删。内容上只放三类「每次都适用」的东西：技术栈和目录结构（是什么）、项目目的（为什么）、构建/测试/验证命令与工作流约定（怎么做）。而且指令不是越多越好——社区有人自查出 125 条积累指令、分不清哪条有用[^12]；官方口径也点名了几类反模式：新模型已默认尽力，`be maximally thorough` 会导致多余搜索、`double-check your work` 会导致重做已完成的工作，看似稳妥的叮嘱实为 token 税。删指令比加指令更常见地才是正确动作。
 
 `/init` 可以用来起草，但生成完必须逐行手改。自动生成的版本常见两个毛病：啰嗦，以及夹带只在当时成立的一次性指令。
 
@@ -247,6 +247,7 @@ CLAUDE.md 是要长期维护的。对它只有三种合法操作：**增**（加
 [^9]: [Claude Code Docs: Import files / How CLAUDE.md files load / Organize rules](https://code.claude.com/docs/en/memory)（官方，2026-08-15 核实）：被 `@` 导入的文件在会话启动时即载入上下文窗口，导入不减少上下文占用；`.claude/rules/` 只有带 `paths:` 字段时才做条件加载；子目录 CLAUDE.md 在 Claude 读到该目录文件时才加载；Skills 仅在被调用或被判定相关时加载。
 [^10]: BOSS 的规则治理笔记（个人实践，2026-06）：把 CLAUDE.md 的维护归结为增 / 删 / 升三个动作，并用「删 + 升 ≥ 增」作为文件不膨胀的判据；「同一规则被违反约 3 次即升级为 hook」在同一份笔记里标为社区经验法则，未见官方确证。
 [^11]: [Claude Code Docs: Instructions seem lost after /compact](https://code.claude.com/docs/en/memory)（官方，2026-08-15 核实）：项目根 CLAUDE.md 在 compact 后从磁盘重读并重新注入；子目录嵌套的 CLAUDE.md 与带 `paths:` 的 rules 不自动重注入，等 Claude 再次读到对应目录或匹配文件时才重新加载。
+[^12]: [r/ClaudeAI: Anthropic says "double-check your work" is now an anti-pattern](https://www.reddit.com/r/ClaudeAI/comments/1wcdisq/)（社区，2026-09-10，146 分 / 61 评论）：呼应官方降本口径——新模型已默认尽力，"be maximally thorough" 导致多余搜索、"double-check your work" 导致重做已完成工作；楼主自述 config 里积了 125 条指令分不清哪条有用。**官方口径经社区转述，原帖附官方帖链接；「125 条」为楼主个人情况**。
 
 ---
 

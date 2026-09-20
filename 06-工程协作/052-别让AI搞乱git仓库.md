@@ -9,7 +9,7 @@
 | AI 执行了 `git reset --hard` / `git push --force` | `git reflog` 找回本地；远端已 force push 就立刻通知全队别 pull | 把破坏性命令逐条写进 `permissions.deny` |
 | CLAUDE.md 里写了「别 force push」，它照做不误 | 改写成 `permissions.deny` 规则 | 权限规则由 Claude Code 执行，不由模型执行 |
 | `git log` 里出现 `Co-Authored-By: Claude …` | `attribution.commit` / `attribution.pr` 设空串，`sessionUrl` 设 `false` | 放 `~/.claude/settings.json`，别在项目级一刀切 |
-| 升级后发现 commit / PR 描述被塞进 `claude.ai/code/session…` 链接 | 同上一行，`sessionUrl` 设 `false` | 2026-08-30 起新版默认写入[^7]，升级后跑 `git log -1` 查一遍 footer |
+| web / Remote Control 会话的 commit / PR 描述被塞进 `claude.ai/code/session…` 链接 | `attribution.sessionUrl` 设 `false`（保 Co-Authored-By、去链接） | 官方 08-17 定性：**仅 web / Remote Control 会话写入，本地会话不受影响**[^7]；这类会话没有 shell，settings 要提前配好 |
 | `/rewind` 退不回来 —— 文件是 AI 用 Bash 删的 | `git checkout .`；未跟踪文件靠之前的 `git stash -u` | 动手前 `git status` 必须干净 |
 | 一次会话堆成一个几十文件的巨型 commit | `git reset --soft HEAD~1` 后用 `git add -p` 重新拆 | 提交前先让它列拆分方案，人定 commit 边界 |
 | 分支开了三天，merge 时冲突一片、AI 的假设全过期 | 拆小、尽快合 | 一个 AI 任务一个分支，几小时内 merge 掉 |
@@ -122,7 +122,7 @@ exit 0   # 不打印 JSON = 不做决定，走正常权限流程
 
 ### 第 3 步：按场景决定要不要去掉署名
 
-先定档位：内部私有仓可以关；对外贡献前必须先查目标项目的 AI 政策 —— 有的项目（如 Kubernetes）明令要求披露 AI 使用，为了隐藏而关署名反而违规（取舍细节见文末折叠块）。决定要关的话，默认 commit 带 `Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>`（trailer 里的模型名跟随当前会话的模型变化），PR 描述带 `🤖 Generated with [Claude Code](https://claude.com/claude-code)`，全部关掉[^4]：
+先定档位：内部私有仓可以关；对外贡献前必须先查目标项目的 AI 政策 —— 有的项目（如 Kubernetes）明令要求披露 AI 使用，为了隐藏而关署名反而违规（取舍细节见文末折叠块）。决定要关的话，默认 commit 带 `Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>`（trailer 里的模型名跟随当前会话的模型变化），PR 描述带 `🤖 Generated with [Claude Code](https://claude.com/claude-code)`，全部关掉[^4]。另一类「提交卫生」痛点是事后清理：coding agent 的提交信息里常混着无意义的过程叙述和私有仓 issue 引用，开源发布前需要批量改写——Simon Willison 为此写了 commit-rewriter（`uvx commit-rewriter`），Datasette 的安全发版就是先用它清理后才公开的[^8]。
 
 ```json
 { "attribution": { "commit": "", "pr": "", "sessionUrl": false } }
@@ -294,7 +294,8 @@ checkpoint 跟着对话一起存，`--resume` 恢复会话之后 `/rewind` 仍�
 [^4]: [Claude Code settings](https://code.claude.com/docs/en/settings)（官方，2026-08）：要隐藏全部署名，把 `commit` 和 `pr` 设为空串、`sessionUrl` 设为 `false`；`attribution` 优先级高于已弃用的 `includeCoAuthoredBy`。
 [^5]: [Trunk-Based Development with Short-Lived Branches — dev.to](https://dev.to/tacoda/trunk-based-development-with-short-lived-branches-5f74)（社区，2024-04）：agent 基于开分支时的状态写代码，main 却在往前走，等到合并时它一半的假设已经不成立。
 [^6]: [Checkpointing — Claude Code Docs](https://code.claude.com/docs/en/checkpointing)（官方，2026-08）：`/rewind` 或空输入框连按两下 `Esc` 打开菜单，提供 Restore code and conversation / Restore conversation / Restore code / Summarize from here / Summarize up to here 五个动作，两个 code 选项仅在该 checkpoint 有被跟踪改动时出现；不跟踪 Bash 命令、后台 subagent、外部编辑器与并发会话的改动，restore 跳过软链接与硬链接路径；每会话保留最近 100 个 checkpoint 快照，checkpoint 随 session 在 `cleanupPeriodDays` 天后删除（默认 30 天）。
-[^7]: [Claude Session URL appended to commit messages and PR descriptions by default — GH #66504](https://github.com/anthropics/claude-code/issues/66504)（官方 issue，2026-08-30 起，124+ 评论，截至 2026-09-06 仍 open）与 [r/ClaudeAI: Claude Code is silently adding session URLs](https://www.reddit.com/r/ClaudeAI/comments/1w2omfu/claude_code_is_silently_adding_session_urls/)（300 分 / 57 评论）：新版默认把 `claude.ai/code/session…` 链接写进 commit message 与 PR 描述，社区指出会话 URL 是可循迹标识、进公开仓库有泄露面；同族另有 harness 注入 Co-Authored-By 指令被指越过用户级 CLAUDE.md 的报告（[1w62h7e](https://www.reddit.com/r/ClaudeAI/comments/1w62h7e/)，104 分）。**默认值的最终口径以官方 issue 结论为准**；关闭手段即上一行的 attribution 配置。
+[^7]: [GH #66504](https://github.com/anthropics/claude-code/issues/66504)（官方 issue，2026-08-30 提交、**2026-08-17 由官方成员 Boris Cherny 关闭并定性**，2026-09-20 复核）：session 链接**仅在 web 与 Remote Control 会话**写入 commit message 与 PR 描述，本地会话不受影响；关闭写法 `{ "attribution": { "sessionUrl": false } }`（保留 Co-Authored-By、去掉链接），官方文档 [settings#attribution-settings](https://code.claude.com/docs/en/settings#attribution-settings)。社区在评论区指出 web 会话没有 shell、容器化环境里 `~/.claude/settings.json` 无法持久，opt-in 默认值的诉求未被采纳、issue 保持关闭；另有人从 harness 源码挖出环境变量 `CLAUDE_CODE_SUPPRESS_SESSION_ATTRIBUTION=1`（非官方文档记载）。
+[^8]: [commit-rewriter 0.1 — Simon Willison](https://github.com/simonw/commit-rewriter/releases/tag/0.1)（开源工具发布，2026-09-14）：`uvx commit-rewriter` 批量清理 coding agent 提交信息中的过程垃圾与私有仓 issue 引用，作者用于 Datasette 安全发版前的提交清理。
 
 ---
 

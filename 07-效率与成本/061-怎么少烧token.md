@@ -42,6 +42,8 @@ flowchart TD
 
 **2. 少挂 MCP。** MCP 工具定义默认延迟加载（只有工具名进上下文，用到时才载入完整 schema），但仍然是开销[^7]。官方建议：能用命令行工具（`gh`、`aws`、`gcloud`）就别用 MCP，因为 CLI 不占工具列表[^7]。用 `/mcp` 看已配置的，停掉没在用的。
 
+**2b. 砍掉用不到的内置能力，瘦身起始上下文。**官方文档已收载三个开关：`enableArtifact: false`（关闭 Artifact 工具；旧写法 `disableArtifact: true` 已废弃但仍被接受）、`enableWorkflows: false` 或环境变量 `CLAUDE_CODE_DISABLE_WORKFLOWS`（关闭动态 workflows 与内置 workflow 命令；Pro 计划本就默认关）；Chrome 集成的关闭没有本地键，只有组织级 admin console 开关[^10]。社区对照实测的前后差异进脚注——不用 Artifact、不用 workflows、不碰 Chrome 集成的会话，起始 token 可省一截，但这三个开关的前提是「你真的不用」，为省而关再手动开回来反而费事。
+
 **3. 把 CLAUDE.md 精简到 200 行以内。** 原则：Claude 能从读代码推断出来的，删掉；专项工作流指令（PR 审查清单、DB 迁移步骤）下沉到 skills 按需加载[^3]。写法见 [#010 CLAUDE.md 怎么写才真的生效](../02-上下文工程/010-CLAUDE-md怎么写才生效.md)。
 
 <details>
@@ -61,7 +63,7 @@ flowchart TD
 
 **6. prompt 写具体。** "improve this codebase" 会触发全库扫描；"add input validation to the login function in auth.ts" 让它读最少的文件就开工。改动前先用 plan mode（连按两次 `Shift+Tab`）探一探，避免走错方向后的昂贵返工。
 
-**7. 大输出操作丢给 subagent，或用 hook 先过滤。** 跑测试、抓文档、处理日志这类活交给 subagent，冗长内容留在子上下文，只把摘要回给主上下文。也可以用 PreToolUse hook 在命令执行前改写它（见下面的折叠块）。这套 hook 思路的工业级版本：Spotify 工程团队用 PreToolUse hook 拦截超长文件读取（>350 行）和样板代码生成，改派给一个廉价 worker 模型（示例用 Gemini 2.5 Flash）处理，原始内容不进主模型上下文、只回结构化摘要，实测主链路 token 省约 90%[^9]——「贵模型只看摘要、便宜模型啃原文」在本篇第 6 条之外又多了一个可抄的自动化形态。
+**7. 大输出操作丢给 subagent，或用 hook 先过滤。** 跑测试、抓文档、处理日志这类活交给 subagent，冗长内容留在子上下文，只把摘要回给主上下文。也可以用 PreToolUse hook 在命令执行前改写它（见下面的折叠块）。这套 hook 思路的工业级版本：Spotify 工程团队用 PreToolUse hook 拦截超长文件读取（>350 行）和样板代码生成，改派给一个廉价 worker 模型（示例用 Gemini 2.5 Flash）处理，原始内容不进主模型上下文、只回结构化摘要，实测主链路 token 省约 90%[^9]——「贵模型只看摘要、便宜模型啃原文」在本篇第 6 条之外又多了一个可抄的自动化形态。该方案 09-09 起已插件化：`claude plugin marketplace add spotify/portal-ai-plugins` 装上 portal / shunt 两个插件即可获得同样的强制路由，不必自己维护 hook（Reddit 488 分帖为安装指引的主要传播源）。
 
 **8. 调低 extended thinking。** thinking token 按 output 价计费，默认预算每请求可达数万[^7]。用 `/effort` 降级、`/config` 关掉思考（Fable 5 不支持关闭），或设 `MAX_THINKING_TOKENS=8000`（只对固定思考预算的模型生效，自适应推理模型用 `/effort` 调档）。
 
@@ -214,7 +216,8 @@ CLAUDE.md 在会话启动时就载入上下文。如果里面塞了专项工作�
 [^6]: 个人研究（2026-06，跨工具痕迹采集可行性评估）：Claude Code 本地 jsonl 里的 token 数被系统性少算 1–2 个数量级，只能看趋势、不能当绝对值。未见官方对该偏差的确证说明。
 [^7]: [Manage costs effectively — Claude Code Docs](https://code.claude.com/docs/en/costs)（官方，2026-08-15 核实）：MCP 工具定义默认延迟加载（deferred by default，仅工具名进上下文）；官方原文建议优先用 `gh`、`aws`、`gcloud` 等 CLI；thinking token 按 output 计费、默认预算依模型可达每请求数万，`/effort` 与 `MAX_THINKING_TOKENS=8000` 均见原文；`/usage` 的归因与 `d`/`w` 视图切换同页。
 [^8]: [Discover and install prebuilt plugins — Claude Code Docs](https://code.claude.com/docs/en/discover-plugins)（官方，2026-08-15 核实）：code intelligence 插件清单（`typescript-lsp`、`pyright-lsp`、`gopls-lsp`、`rust-analyzer-lsp` 等）、需自装语言服务器二进制、安装命令与诊断行为。
-[^9]: [Portal by Spotify cut my Claude Code token usage by 90% — Spotify Engineering](https://engineering.atspotify.com/2026/9/portal-by-spotify-cut-my-claude-code-token-usage-by-90)（厂商工程博客，2026-09-04；[HN 讨论](https://news.ycombinator.com/item?id=49571465) 260 分）：PreToolUse hook 拦截超 350 行的文件读取与样板生成，改派廉价 worker 模型处理，原始内容不进主模型上下文、只回结构化摘要，作者实测个人链路 token 省约 90%。**单人实测数字，未经第三方复核**；hook 改写命令本身是官方支持的机制（见第 7 条折叠块的官方示例）。
+[^9]: [Portal by Spotify cut my Claude Code token usage by 90% — Spotify Engineering](https://engineering.atspotify.com/2026/9/portal-by-spotify-cut-my-claude-code-token-usage-by-90)（厂商工程博客，2026-09-04；[HN 讨论](https://news.ycombinator.com/item?id=49571465) 260 分）：PreToolUse hook 拦截超 350 行的文件读取与样板生成，改派廉价 worker 模型处理，原始内容不进主模型上下文、只回结构化摘要，作者实测个人链路 token 省约 90%。**单人实测数字，未经第三方复核**；hook 改写命令本身是官方支持的机制（见第 7 条折叠块的官方示例）。插件化落地见 [r/ClaudeAI: Cut your Claude Code cost by 90% using the Spotify Method](https://www.reddit.com/r/ClaudeAI/comments/1wbmcgw/)（社区，2026-09-09，488 分 / 115 评论），marketplace 源 `spotify/portal-ai-plugins`。
+[^10]: [Settings reference — Claude Code Docs](https://code.claude.com/docs/en/settings-reference) 与 [Settings — Claude Code Docs](https://code.claude.com/docs/en/settings)（官方，2026-09-20 核实）：`disableArtifact` 已标 Deprecated、由 `enableArtifact` 取代（`disableArtifact: true` 仍被接受为等价写法；`enableArtifact: false` 任意 scope 生效、managed settings 也开不回来，要求 v2.1.242+）；`disableWorkflows` 面向「配置能触达的所有人」（组织 managed settings 用），个人开关是 `enableWorkflows`，另有按会话的 `CLAUDE_CODE_DISABLE_WORKFLOWS`；Pro 计划默认 workflows 为 off。**两键均只进了 settings-reference、未进 CHANGELOG**。起始 token 的量化差异来自社区对照（[r/ClaudeAI](https://www.reddit.com/r/ClaudeAI/comments/1vw06ib/)，27 分）：`enableArtifact: false` 约 -6.5k、关 workflows 约 -5k、不用 Chrome 集成避免约 22k 的 schema 灌入——**单人实测数字，Chrome 关闭无官方本地键**（官方仅有组织级 admin 开关，见 CHANGELOG v2.1.260）。
 
 ---
 
