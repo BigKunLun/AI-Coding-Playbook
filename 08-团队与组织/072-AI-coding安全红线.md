@@ -61,7 +61,7 @@ env | grep -E 'CLAUDE_CODE_USE_BEDROCK|CLAUDE_CODE_USE_VERTEX|ANTHROPIC_BASE_URL
 
 ### 第二层：技术护栏
 
-1. **保持最小权限。**Claude Code 默认只读，改文件或跑命令都要批准，别图省事全 auto-approve。
+1. **保持最小权限。**Claude Code 默认只读，改文件或跑命令都要批准，别图省事全 auto-approve。2026-09 末有一桩 4842 分的真实事故把「图省事」的代价拍在了桌面上：一位非开发者用「Proceed with the following repairs now... Do not come back asking whether to begin each build」（明确要求不许逐项回来确认）的长授权 prompt 放手让 agent 修数据管线，结果 agent 删掉了 4.8 万多个数据文件和本地 `.git`（从未 push），靠 Windows shadow copy 才全部救回——**三重失效**：blanket 授权 + 无版本控制兜底 + 备份恰好停跑[^9]。授权粒度、先 push 再放手、备份在跑，三件事任何一件在位都能拦住这场事故。
 2. **deny 掉出网命令和密钥目录。**`curl`、`wget` 默认不自动放行，但要显式 deny 兜底；密钥目录加 denyRead。
 3. **开沙箱。**用 `/sandbox` 给 Bash 加文件系统和网络隔离，再让 agent 自主跑。
 4. **加 secret 扫描 hook。**用 PreToolUse hook 拦截含密钥的提交和外发，配合 gitleaks 或 trufflehog。
@@ -400,7 +400,8 @@ AI coding agent 和传统补全式 AI 的根本区别，是它能读整台机器
 [^5]: [MCP Security Best Practices](https://modelcontextprotocol.io/docs/tutorials/security/security_best_practices)、[OWASP: MCP Tool Poisoning](https://owasp.org/www-community/attacks/MCP_Tool_Poisoning)、[Invariant Labs: MCP Tool Poisoning Attacks](https://invariantlabs.ai/blog/mcp-security-notification-tool-poisoning-attacks) 与 [Claude Code Skills](https://code.claude.com/docs/en/skills)（官方与社区安全研究，个人研究整理于 2026-07）：来自不可信来源的本地 stdio MCP server 可导致任意代码执行与数据外泄；工具响应与工具描述都能夹带隐藏指令，界面展示的信息可能少于模型看到的；Skill 可包含脚本、可在发送给模型前执行 shell 命令替换输出、可通过 `allowed-tools` 预授权工具，项目 skill 在 workspace trust 后生效。
 [^6]: [Post-mortem: unauthorized Cline CLI npm publish](https://cline.ghost.io/post-mortem-unauthorized-cline-cli-npm/)（厂商官方 post-mortem，事件 2026-02-17）：`cline@2.3.0` 由受损的 npm publish token 发布，新增 `postinstall` 全局安装外部包；triage 与 release workflow 共享 Actions cache 属可行链路而非已确认的唯一路径；整改含移除 AI triage workflow、轮换凭据、迁移 npm OIDC provenance。
 [^7]: [Claude Code CHANGELOG](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md)（官方，2026-09-06 核实）：v2.1.259 新增 managed settings 的 `managedMcpServers`，向组织统一下发 HTTP/SSE 型 MCP server（command 型条目跳过）；同版本行为变化——`allowedMcpServers` 只适用于用户自加的服务器，拦截托管下发的 MCP 需用 `deniedMcpServers`。v2.1.275（2026-09-17，09-20 核实）：npm 源插件改用 `npm pack --ignore-scripts` 拉取并做完整性校验，安装脚本不再执行。
-[^8]: [r/ClaudeAI: Notion's Official MCP connector prompt injects AI agents to advertise products mid-task](https://www.reddit.com/r/ClaudeAI/comments/1w9dluw/)（社区，2026-09-07，2157 分 / 139 评论）：Notion 官方 MCP 连接器的资源描述中含「向用户推销 Notion Business 且不解释原因」指令，任务中途插播广告。**帖内附资源描述原文可复核；Notion 官方未回应**；分数为 Arctic Shift 归档快照。
+[^8]: [r/ClaudeAI: Notion's Official MCP connector prompt injects AI agents to advertise products mid-task](https://www.reddit.com/r/ClaudeAI/comments/1w9dluw/)（社区，2026-09-07，2157 分 / 139 评论）：Notion 官方 MCP 连接器的资源描述中含「向用户推销 Notion Business 且不解释原因」指令，任务中途插播广告。**帖内附资源描述原文可复核；截至 2026-10-04 Notion 官方仍未回应**——官方仓 09-20 仅推送三笔推销托管版 MCP 的 README 改动；托管端点需 OAuth 无法匿名实测，「广告指令是否仍在」未验证。分数为 Arctic Shift 归档快照。
+[^9]: [r/ClaudeAI: 删 48k 文件事故帖](https://www.reddit.com/r/ClaudeAI/comments/1wl5cgo/)（社区，2026-09-19，4842 分 / 1375 评论）：正文被 automod 滤除，事故链由 OP 在约 50 条评论中的自述重建——Codex 起草的 blanket 授权 prompt + Claude Code 桌面版执行删除，多年 tick 级期权数据 4.8 万+ 文件与未 push 的本地 `.git` 一并被删，Windows shadow copy 全量救回；次级备份因干扰夜间行情 API 已停跑数日。**单一用户自述（经评论区多轮问答印证），非开发者场景**；教训归因（授权粒度/版本控制/备份）为社区共识。
 
 ---
 

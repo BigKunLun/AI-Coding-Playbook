@@ -29,7 +29,7 @@ flowchart TD
 
 按「性价比 × 你能控制的程度」排序：1–2 不花力气就有收益，3–6 是每天要拧的螺丝，7–9 是进阶。
 
-**1. 别拆掉缓存地基。** MCP server 只在会话开始时连好，不要中途连或断；一段会话内不要频繁切模型；不要每轮把时间戳或 UUID 注进 CLAUDE.md 或系统提示。这条不需要多做什么，只需要不做破坏动作。
+**1. 别拆掉缓存地基。** MCP server 只在会话开始时连好，不要中途连或断；一段会话内不要频繁切模型——**effort 档位同理**，中途改同样打爆 prompt cache，官方指南给的保缓存姿势是用 per-message effort（beta）按条消息调档，而不是动顶层设置[^11]；不要每轮把时间戳或 UUID 注进 CLAUDE.md 或系统提示。这条不需要多做什么，只需要不做破坏动作。另有一个藏在子代理里的同类坑：**主会话缓存默认 1 小时、子代理等后台请求默认只有 5 分钟**——任何超过 5 分钟的工具调用（测试、构建、git hook）返回后，子代理的整个前缀按写价重写。官方设置 `subagentPromptCacheTtl`（可选 `"5m"` / `"1h"`，v2.1.242+）一行解决，社区实测把 cache 写费用降到约四分之一[^11]。
 
 <details>
 <summary>怎么确认没被拆（及 ccusage 的口径限制）</summary>
@@ -43,6 +43,8 @@ flowchart TD
 **2. 少挂 MCP。** MCP 工具定义默认延迟加载（只有工具名进上下文，用到时才载入完整 schema），但仍然是开销[^7]。官方建议：能用命令行工具（`gh`、`aws`、`gcloud`）就别用 MCP，因为 CLI 不占工具列表[^7]。用 `/mcp` 看已配置的，停掉没在用的。
 
 **2b. 砍掉用不到的内置能力，瘦身起始上下文。**官方文档已收载三个开关：`enableArtifact: false`（关闭 Artifact 工具；旧写法 `disableArtifact: true` 已废弃但仍被接受）、`enableWorkflows: false` 或环境变量 `CLAUDE_CODE_DISABLE_WORKFLOWS`（关闭动态 workflows 与内置 workflow 命令；Pro 计划本就默认关）；Chrome 集成的关闭没有本地键，只有组织级 admin console 开关[^10]。社区对照实测的前后差异进脚注——不用 Artifact、不用 workflows、不碰 Chrome 集成的会话，起始 token 可省一截，但这三个开关的前提是「你真的不用」，为省而关再手动开回来反而费事。
+
+**2c. 输入框的 Prompt Suggestions 是隐性固定开销。**输入框的灰色建议词每次触发都会对全上下文做一次 cache read，社区仪表化实测其中位数成本约为正常 prompt 的 91%、最高可吃掉约 10% 的周限额[^12]——重度用户在设置里关掉它是一行零成本的止损。同帖还提醒：缓存过期后别急着 `/compact`，先让对话自然续跑一次往往更便宜。
 
 **3. 把 CLAUDE.md 精简到 200 行以内。** 原则：Claude 能从读代码推断出来的，删掉；专项工作流指令（PR 审查清单、DB 迁移步骤）下沉到 skills 按需加载[^3]。写法见 [#010 CLAUDE.md 怎么写才真的生效](../02-上下文工程/010-CLAUDE-md怎么写才生效.md)。
 
@@ -218,6 +220,8 @@ CLAUDE.md 在会话启动时就载入上下文。如果里面塞了专项工作�
 [^8]: [Discover and install prebuilt plugins — Claude Code Docs](https://code.claude.com/docs/en/discover-plugins)（官方，2026-08-15 核实）：code intelligence 插件清单（`typescript-lsp`、`pyright-lsp`、`gopls-lsp`、`rust-analyzer-lsp` 等）、需自装语言服务器二进制、安装命令与诊断行为。
 [^9]: [Portal by Spotify cut my Claude Code token usage by 90% — Spotify Engineering](https://engineering.atspotify.com/2026/9/portal-by-spotify-cut-my-claude-code-token-usage-by-90)（厂商工程博客，2026-09-04；[HN 讨论](https://news.ycombinator.com/item?id=49571465) 260 分）：PreToolUse hook 拦截超 350 行的文件读取与样板生成，改派廉价 worker 模型处理，原始内容不进主模型上下文、只回结构化摘要，作者实测个人链路 token 省约 90%。**单人实测数字，未经第三方复核**；hook 改写命令本身是官方支持的机制（见第 7 条折叠块的官方示例）。插件化落地见 [r/ClaudeAI: Cut your Claude Code cost by 90% using the Spotify Method](https://www.reddit.com/r/ClaudeAI/comments/1wbmcgw/)（社区，2026-09-09，488 分 / 115 评论），marketplace 源 `spotify/portal-ai-plugins`。
 [^10]: [Settings reference — Claude Code Docs](https://code.claude.com/docs/en/settings-reference) 与 [Settings — Claude Code Docs](https://code.claude.com/docs/en/settings)（官方，2026-09-20 核实）：`disableArtifact` 已标 Deprecated、由 `enableArtifact` 取代（`disableArtifact: true` 仍被接受为等价写法；`enableArtifact: false` 任意 scope 生效、managed settings 也开不回来，要求 v2.1.242+）；`disableWorkflows` 面向「配置能触达的所有人」（组织 managed settings 用），个人开关是 `enableWorkflows`，另有按会话的 `CLAUDE_CODE_DISABLE_WORKFLOWS`；Pro 计划默认 workflows 为 off。**两键均只进了 settings-reference、未进 CHANGELOG**。起始 token 的量化差异来自社区对照（[r/ClaudeAI](https://www.reddit.com/r/ClaudeAI/comments/1vw06ib/)，27 分）：`enableArtifact: false` 约 -6.5k、关 workflows 约 -5k、不用 Chrome 集成避免约 22k 的 schema 灌入——**单人实测数字，Chrome 关闭无官方本地键**（官方仅有组织级 admin 开关，见 CHANGELOG v2.1.260）。
+[^11]: [Settings reference — Claude Code Docs](https://code.claude.com/docs/en/settings-reference)（官方，2026-10-04 抓取）：`subagentPromptCacheTtl` 条目原文——适用于 subagents、workflows 与 Claude Code 自身的后台/辅助请求（compaction、会话标题等），可选 "5m"/"1h"、默认不设（即 5 分钟），1 小时档每次 cache write 按更高费率计费，要求 v2.1.242+；CHANGELOG v2.1.243 记载该键加入，v2.1.248 另有 agent frontmatter 的 `experimental.cacheTtl`。**「cache 写降至约四分之一」为社区单人实测**（[r/ClaudeAI](https://www.reddit.com/r/ClaudeAI/comments/1wj4gs0/)，121 分 / 49 评论），官方只确认计费差异。per-message effort 见 [Anthropic 官方 prompting 指南转述](https://www.reddit.com/r/ClaudeAI/comments/1ws08mu/)（社区转述官方文档，1669 分）：顶层 effort 改动会使 prompt cache 全失效，官方建议用 per-message effort（beta）保缓存——**该指南为模型版本相关内容，写法随版本演进，用前回查官方文档**。
+[^12]: [r/ClaudeAI: PSA — Turn off Prompt Suggestions, save ~10% of limits](https://www.reddit.com/r/ClaudeAI/comments/1wm8adm/)（社区，2026-09-21，554 分 / 111 评论）：输入建议词每次触发对全上下文做一次 cache read，仪表化实测中位数成本约为正常 prompt 的 91%、最高吃掉约 10% 周限额。**单人仪表化实测，方法在帖内公开**；关闭入口为设置里的 Prompt Suggestions 开关。
 
 ---
 

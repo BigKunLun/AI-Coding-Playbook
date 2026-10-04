@@ -223,6 +223,8 @@ Summarize the changes above in two or three bullet points, then list any risks y
 
 配套还有 `test-driven-development`（强制 RED-GREEN-REFACTOR，见 [030 篇](./030-AI写的测试不可信.md)）、`systematic-debugging`、`verification-before-completion`、`requesting-code-review` 等。它的 `using-superpowers` skill 甚至定了一条硬规则：哪怕只有 1% 的可能某个 skill 适用，也必须调用它。这是用 skill 强制流程的极端形态。
 
+**时效判断（2026-09 更新）**：社区对 superpowers 这类「重型流程 skill 集」的共识正在转向**对新模型冗余**——它默认占着上下文、把过度 spec 强加给已经会规划的模型，反而降质。可操作的判定法：拿几张代表性工单做 on / off 对跑、数一次通过率，过不了就整组下掉；仍值得保留的场景基本只剩「用大模型编排、给小模型立规矩」这一种。skill 栈和依赖一样要新陈代谢，装了不测、测了不退场，等于常驻 token 税[^11]。
+
 `brainstorming` 的真实 frontmatter：
 
 ```yaml
@@ -378,6 +380,7 @@ skill 不是「又一种 prompt」，而是把人类专家的流程化经验打�
 [^8]: [Extend Claude with skills — Claude Code Docs](https://code.claude.com/docs/en/skills)（官方，2026-08-15 核实）：Run evals with skill-creator 一节，基线对比是在全新会话里分别以「有 skill / 禁用 skill」跑同一批真实 prompt；`skill-creator` 插件（官方 marketplace）把这个循环自动化，含两版 skill 的盲测 A/B。
 [^9]: [CHANGELOG v2.1.7 — anthropics/claude-code](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md)（官方，2026-01，2026-08-15 核实）：Enabled MCP tool search auto mode by default for all users——MCP 工具描述超过上下文窗口 10% 时自动延迟加载，改由 MCPSearch 工具按需发现。
 [^10]: [How well do agents use test/verification techniques? — Dan Luu](https://danluu.com/agentic-testing/)（个人博客实测，2026-09-08，HN 191 分）：Zstd 实现评测上 26 种提示条件/skill（TDD、Lean 4、QuickCheck 等）各跑 80–160 次，几乎全部不优于无指令基线；agent 对点名技术表面合规（空洞证明、平凡性质、拒绝路径随机输入）；有效项为结构约束与短 nudge 规则；多数条件间成绩差在噪音范围。**单人博客的实验设计（自评基准），方法透明但未经同行评审**。
+[^11]: [r/ClaudeAI: Superpowers skill — do you still need it?](https://www.reddit.com/r/ClaudeAI/comments/1wt84ix/)（社区共识帖，2026-09-29，74 分 / 48 评论）：对近两代模型已冗余（默认占上下文、过度 spec 反而降质）；判定法为代表性工单 on/off 对跑数一次通过率；「大模型控小模型」场景仍可能值得。**共识性讨论而非对照实验**。
 
 ---
 
