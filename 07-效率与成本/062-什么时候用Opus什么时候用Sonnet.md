@@ -118,6 +118,8 @@ extended thinking（扩展思考，指让模型在回答前多想一段）产生
 
 </details>
 
+「关键节点才上强模型」如今有了官方内置形态：settings 的 `advisorModel`（官方示例即 `{"advisorModel": "opus"}`）会在任务的关键决策点向第二个通常更强的模型咨询，主力模型照常干活[^9]。默认不开启，`--advisor` 可单会话启用，`CLAUDE_CODE_DISABLE_ADVISOR_TOOL` 可整体关死；官方要求 advisor 至少与主力模型同档。社区的同题解法还有「按任务选模型、永远不按轮降级」——中途把当前会话换成小模型只省输出 token，每轮仍全量重发上下文，弱模型读一段它没参与构建的大上下文必然跑偏；要省就开子代理换模型，或让当前会话写完 handoff 再开新会话[^10]。另有一条不易发现的缓存差异：Opus / Sonnet 改 effort 不重建 prompt cache，**Fable 改 effort 会整个重建**——在 Fable 上做自动档位切换的工具要把它关掉[^10]。
+
 ## 为什么
 
 ### 贵模型不一定贵，但无脑用贵的一定亏
@@ -194,6 +196,8 @@ extended thinking（扩展思考，指让模型在回答前多想一段）产生
 [^6]: [Create custom subagents — Claude Code Docs](https://code.claude.com/docs/en/sub-agents)（官方，核实于 2026-08-15）：内置 Explore 从 v2.1.198 起继承主会话模型、在 Claude API 上封顶到 Opus；同名（Explore）的用户/项目级子代理会覆盖内置版本并保留自己的 `model` 字段。
 [^7]: [Manage costs effectively — Claude Code Docs](https://code.claude.com/docs/en/costs)（官方，核实于 2026-08-15）：思考 token 按 output token 计费，默认预算随模型不同、每个请求可达数万 token（tens of thousands of tokens per request depending on the model）。
 [^8]: [Pricing — Claude Platform Docs](https://platform.claude.com/docs/en/about-claude/pricing)（官方，2026-08-15 核实）原文：「Claude 4.7 and later models and Claude Mythos Preview use a newer tokenizer… This tokenizer produces approximately 30% more tokens for the same text. The exact increase depends on the content and workload shape. Claude Sonnet 4.6 and earlier models use the previous tokenizer.」同页确认 Fable 5 为 $10/$50、Opus 5 为 $5/$25、Sonnet 5 为 $2/$10、Haiku 4.5 为 $1/$5。
+[^9]: [Settings reference — advisorModel](https://code.claude.com/docs/en/settings-reference) 与 [Advisor — Claude Code Docs](https://code.claude.com/docs/en/advisor)（官方，2026-10-18 核实）：键名 `advisorModel`（官方示例 `{"advisorModel": "opus"}`），server-side advisor tool 在任务关键节点向第二个通常更强的模型咨询；默认 unset 关闭，`--advisor` 单会话启用，`CLAUDE_CODE_DISABLE_ADVISOR_TOOL` 关死；官方要求 advisor 至少与主力模型同档。**注意官方内部口径不一致**：advisor 专页写 Claude Platform on AWS 不可用，CHANGELOG v2.1.300 却写已在该平台新增——以实际运行为准。
+[^10]: [r/ClaudeAI: 降级模型总搞坏 session（顶评）](https://www.reddit.com/r/ClaudeAI/comments/1wwuw19/)（社区顶评 12 赞，2026-10-03 尾部二次确认）：按任务选模型、别按轮降级——中途换小模型只省输出、每轮仍全量重发上下文。Fable 改 effort 会重建 prompt cache（Opus/Sonnet 不会）出自 [effortless mod 帖](https://www.reddit.com/r/ClaudeAI/comments/1x1nnkn/)（255 分 / 73 评论，2026-10-09）——**单一 mod 作者的机制观察，未见官方文档确认**。
 
 ---
 

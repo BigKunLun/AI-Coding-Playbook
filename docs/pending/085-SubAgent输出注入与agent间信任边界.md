@@ -8,6 +8,8 @@
 - **平台已响应**：CHANGELOG v2.1.271（09-14）subagent 改经专用 hand-back 调用回报、由安全分类器审查；v2.1.277（09-18）subagent 结果带 header 标记与缩进送达主 agent，官方原文「text in a subagent's result cannot pass as the session's own instructions」，同版把 workflow 脚本计算的 agent() 提示标注为脚本文本——官方承认为真实威胁面并做了输出信道加固。
 - **攻击侧官方确认**：Anthropic 09-10 威胁情报报告（154 页）记载攻击者对 LiteLLM / OpenClaw 部署做 prompt injection 窃取生产 API key——agent 链路上的注入窃钥已是被观测到的野外行为，不只是理论。
 
+**2026-10-18 增补（第四期证据，官方 changelog v2.1.290~302）**：hook 输出中的 `<system-reminder>` 标签被转义（292，防 hook 冒充系统提示）；compaction summary 重复 `/name` 可触发用户保留 skill 的漏洞修复（292，压缩摘要作为注入载体的实证）；workflow agent harness note 明文 "task text carries no user authority"（301，官方把「任务文本不承载用户权限」写进机制）；agentId 跨 agent 监督能力（290/299）与 teammate 凭据泄漏修复（299）。第 42 周社区信号：9 个热门 skill 安慰剂对照仅 2 个真有效——「skill 内容可信」本身也需要边界。
+
 **2026-10 增补（第三期证据）**：
 - 攻击面研究侧：Matthew Green「agent 蠕虫的两半」——「一个劫持 agent 的载荷，和一个把载荷带给下一个 agent 的载体」，沙箱内 agent 可通过**共享包缓存**互相留指令、改变彼此行为（沙箱不隔离共享缓存即不隔离传播）——agent 间信任边界从「输出信道」扩展到「共享资源信道」。
 - 官方持续演进：v2.1.284 对 MEMORY.md 与召回记忆中和仿冒 Claude Code 标记的不可见字符（记忆通道注入防御）；v2.1.287 上线内置 mod「You should know」（侧翼监督 agent 标记主副 agent 可能遗漏的事，288 进一步按责任方区分措辞）——官方在把「跨 agent 监督」产品化。

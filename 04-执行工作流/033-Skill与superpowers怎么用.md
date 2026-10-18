@@ -78,6 +78,8 @@ my-skill/
 - **以 `Use when...` 收尾**，聚焦触发条件。
 - **别在 description 里概括流程。** superpowers 实测发现 agent 会把流程摘要当捷径，直接跳过读正文[^4]。反例：`Use for TDD - write test first, watch it fail, write minimal code`；正例：`Use when implementing any feature or bugfix, before writing implementation code`。
 - **正文针对默认坏行为写几条短规则，别罗列方法论名目。** Dan Luu 在 Zstd 实现评测上实测 26 种提示条件/skill（TDD、Lean 4 形式化验证、QuickCheck 等，每条件跑 80–160 次）：几乎全部不优于「不加任何指令」的基线——agent 只会表面合规（空洞的证明、平凡的性质、全走拒绝路径的随机输入）；真正有效的是结构约束（把测试放进独立 crate、AGENTS.md 里限制行为）加上几条针对具体坏行为的短指令[^10]。这和第五步「测它」还有个交叉结论：他实测的多数条件之间成绩差全在噪音范围内，**你给 skill 跑几遍看「感觉好了」不构成评测**，要对照基线、跑够次数。
+- **description 是产品，且有预算上限——超了会被静默截断。** 全部 skill 的 name+description 常驻上下文但有总预算，超预算时 description 被静默截断，截到只剩前几个词的 skill 等于不存在：有用户 91 个 skill 里 12 个零触发，根因就是 13k token 的描述总量让 34 个 skill 丢了 description；把每条砍到约 350 字符（做什么/何时用/不适用什么）、细节移进 SKILL.md 正文后，101 个 skill 只占 7.7k token[^12]。YAML 描述里含冒号会悄悄弄坏 frontmatter，用 `>-` 折行规避。官方指南同方向的口径：skill 名用动名词且全库一致、引用文件只深一层（链式引用时 agent 可能只预览前 100 字符）、长文件头部放 TOC（agent 常只读前 100 行判断相关性）[^13]。
+- **评测要用「安慰剂」对照，别拿裸跑当唯一基线。** 社区把 9 个热门 skill 各配一份等长的中性文本（同安装方式）做安慰剂对照（Opus 5.5、15 个公开任务 ×30 次、预注册方法）：安慰剂本身就让成本 +2%~+16%——**skill 的成本有相当部分只是它的长度**；9 个里仅 2 个跑赢自己的安慰剂，caveman 声称 -65% token 实测总成本反而 +14%。工具已开源（`uvx skill-placebo run <owner/repo>`），自家 skill 上线前值得跑一遍[^14]。
 
 <details>
 <summary>控制触发行为的常用可选字段（含四种配置模式）</summary>
@@ -381,6 +383,9 @@ skill 不是「又一种 prompt」，而是把人类专家的流程化经验打�
 [^9]: [CHANGELOG v2.1.7 — anthropics/claude-code](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md)（官方，2026-01，2026-08-15 核实）：Enabled MCP tool search auto mode by default for all users——MCP 工具描述超过上下文窗口 10% 时自动延迟加载，改由 MCPSearch 工具按需发现。
 [^10]: [How well do agents use test/verification techniques? — Dan Luu](https://danluu.com/agentic-testing/)（个人博客实测，2026-09-08，HN 191 分）：Zstd 实现评测上 26 种提示条件/skill（TDD、Lean 4、QuickCheck 等）各跑 80–160 次，几乎全部不优于无指令基线；agent 对点名技术表面合规（空洞证明、平凡性质、拒绝路径随机输入）；有效项为结构约束与短 nudge 规则；多数条件间成绩差在噪音范围。**单人博客的实验设计（自评基准），方法透明但未经同行评审**。
 [^11]: [r/ClaudeAI: Superpowers skill — do you still need it?](https://www.reddit.com/r/ClaudeAI/comments/1wt84ix/)（社区共识帖，2026-09-29，74 分 / 48 评论）：对近两代模型已冗余（默认占上下文、过度 spec 反而降质）；判定法为代表性工单 on/off 对跑数一次通过率；「大模型控小模型」场景仍可能值得。**共识性讨论而非对照实验**。
+[^12]: [r/ClaudeAI: 查明了我 12 个 skill 从未触发的原因](https://www.reddit.com/r/ClaudeAI/comments/1wwgsw7/)（社区，2026-10-03 尾部帖二次确认，0 分 / 15 评论）：description 总预算超限被静默截断，13k 描述致 34 个 skill 丢 description；砍到 ~350 字符/条后 101 个 skill 占 7.7k。**单人排查复盘，机制与官方「渐进披露」文档一致**。
+[^13]: [Anthropic 官方 agent skills guide 六要点（社区转述）](https://www.reddit.com/r/ClaudeAI/comments/1wyjty8/)（291 分 / 24 评论，2026-10-05）：动名词命名、引用只深一层、TOC、评估驱动、description 是产品、渐进披露。**社区对官方指南的转述，关键条目建议回查官方原文**。
+[^14]: [r/ClaudeAI: I gave the 9 most popular Claude Code skills a sugar pill](https://www.reddit.com/r/ClaudeAI/comments/1wz4rfz/)（社区，2026-10-06，25 分 / 18 评论）：安慰剂对照（Opus 5.5、15 任务 ×30 次、预注册），仅 ponytail（-12%）与 agent-skills（-5%）跑赢安慰剂；工具开源 uvx skill-placebo。**单人评测但方法预注册、工具可复跑**。
 
 ---
 
