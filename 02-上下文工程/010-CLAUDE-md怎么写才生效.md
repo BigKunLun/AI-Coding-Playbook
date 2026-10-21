@@ -248,7 +248,7 @@ CLAUDE.md 是要长期维护的。对它只有三种合法操作：**增**（加
 [^10]: BOSS 的规则治理笔记（个人实践，2026-06）：把 CLAUDE.md 的维护归结为增 / 删 / 升三个动作，并用「删 + 升 ≥ 增」作为文件不膨胀的判据；「同一规则被违反约 3 次即升级为 hook」在同一份笔记里标为社区经验法则，未见官方确证。
 [^11]: [Claude Code Docs: Instructions seem lost after /compact](https://code.claude.com/docs/en/memory)（官方，2026-08-15 核实）：项目根 CLAUDE.md 在 compact 后从磁盘重读并重新注入；子目录嵌套的 CLAUDE.md 与带 `paths:` 的 rules 不自动重注入，等 Claude 再次读到对应目录或匹配文件时才重新加载。
 [^12]: [r/ClaudeAI: Anthropic says "double-check your work" is now an anti-pattern](https://www.reddit.com/r/ClaudeAI/comments/1wcdisq/)（社区，2026-09-10，146 分 / 61 评论）：呼应官方降本口径——新模型已默认尽力，"be maximally thorough" 导致多余搜索、"double-check your work" 导致重做已完成工作；楼主自述 config 里积了 125 条指令分不清哪条有用。**官方口径经社区转述，原帖附官方帖链接；「125 条」为楼主个人情况**。
-[^13]: [r/ClaudeAI: What's the one line in your CLAUDE.md that actually changed behavior?](https://www.reddit.com/r/ClaudeAI/comments/1wu40t8/)（社区讨论帖，2026-09-30，993 分 / 166 评论）：高赞回答依次为「歧义先问一个澄清问题再动手」（385 赞）、「不信任假设，可验证先验证、行动前评估置信度」（46 赞）、「别道歉，改完告诉我改了什么」（39 赞）、「没让我改的别改」（22 赞）、「让 Claude 自己写并定期复查自己的 CLAUDE.md」（28 赞）。**社区共识投票，非受控实验**；分数为 Arctic Shift 归档快照。
+[^13]: [r/ClaudeAI: What's the one line in your CLAUDE.md that made the biggest difference?](https://www.reddit.com/r/ClaudeAI/comments/1wu40t8/)（社区讨论帖，2026-09-30，993 分 / 166 评论）：高赞回答依次为「歧义先问一个澄清问题再动手」（385 赞）、「不信任假设，可验证先验证、行动前评估置信度」（46 赞）、「别道歉，改完告诉我改了什么」（39 赞）、「没让我改的别改」（22 赞）、「让 Claude 自己写并定期复查自己的 CLAUDE.md」（28 赞，未能定位原评论、存疑）。**社区共识投票，非受控实验**；分数为 Arctic Shift 归档快照。2026-10-21 复核：可达归档评论中未能定位第五条，四条已逐条核对。
 
 ---
 

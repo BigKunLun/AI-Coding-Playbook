@@ -86,7 +86,7 @@ claude -p "$(cat bench/01-explain/prompt.md)" --model claude-opus-5 --effort hig
 
 `-p` 是非交互模式，一次性出结果，方便存档对比。非交互模式下 `/effort` 设的级别不保存为默认，所以显式带 `--effort` 更稳。
 
-**怎么确认做到位**：你能拿出「同一道题，上周这样答，今天这样答」的两份文本。回归集全过 = 问题在这次会话的上下文，不在工具。这套「固定题当金丝雀」的做法社区已经在规模化：新模型上线当天固定跑一套真实任务做基线、日常复跑对照，风格突变（称呼、口癖的变化）往往比代码质量更早暴露模型切换（LiveNerf 就是其公开版，09-28 Sonnet 5.5 发布后的「变笨/没变笨」争议基本靠它收口）[^6]。
+**怎么确认做到位**：你能拿出「同一道题，上周这样答，今天这样答」的两份文本。回归集全过 = 问题在这次会话的上下文，不在工具。这套「固定题当金丝雀」的做法社区已经在规模化：新模型上线当天固定跑一套真实任务做基线、日常复跑对照，风格突变（称呼、口癖的变化）往往比代码质量更早暴露模型切换（LiveNerf 就是其公开版，09-22 前后 Opus 5.5 上线后的「变笨/没变笨」争议基本靠它收口）[^6]。
 
 ### 第 5 步：确认是客户端回归之后
 
@@ -211,7 +211,7 @@ npm 装的话是 `npm install -g @anthropic-ai/claude-code@<版本>`。
 [^3]: [Model configuration — Claude Code Docs](https://code.claude.com/docs/en/model-config)（官方，2026-08-15 访问）：effort 取值范围、各模型默认档与降档规则、设置优先级、非交互模式行为、`ultrathink` 关键字语义。
 [^4]: [A postmortem of three recent issues](https://www.anthropic.com/engineering/a-postmortem-of-three-recent-issues)（官方，2025-09）：2025-08-31 最差时段约 16% 的 Sonnet 4 请求受影响。
 [^5]: [HN 49404033（Thariq，Claude Code 团队）](https://news.ycombinator.com/item?id=49404033)（官方工程师公开表态，2026-08-22；[原始推文](https://x.com/trq212/status/2091247114869432543)）：原话「We sometimes test API serving configs in Claude Code before rolling them out, and one running now maps the numerical effort value differently... The scale isn't 0-100, the number isn't meaningful on its own, and the effort you selected is the effort you're getting. We've run in-depth evals to confirm this doesn't affect model performance.」。「不影响性能」为官方单方表态，未见独立复现实验证实或证伪。
-[^6]: [r/ClaudeAI: nerf 可测量化讨论（LiveNerf 系列）](https://www.reddit.com/r/ClaudeAI/comments/1wuw9bc/)（社区，2026-10-01，2021 分 / 390 评论，系列帖 2380/994/702 分）：新模型上线当天固定跑一套真实任务做基线、日常复跑对照；风格突变（称呼/口癖）比代码质量更早暴露模型切换。LiveNerf 为社区公开版基准，方法为「同一 prompt 复放 + 固定题金丝雀」。**社区发起的测量实践，非官方基准**；分数为 Arctic Shift 归档快照。
+[^6]: [r/ClaudeAI: nerf 可测量化讨论](https://www.reddit.com/r/ClaudeAI/comments/1wuw9bc/)（社区，2026-10-01，2021 分 / 390 评论）：该帖是讲「固定题金丝雀」方法论的独立帖——新模型上线当天固定跑一套真实任务做基线、日常复跑对照，风格突变（称呼/口癖）比代码质量更早暴露模型切换。LiveNerf 系列另有其帖（2380/994/702 分），为社区公开版基准，方法为「同一 prompt 复放 + 固定题金丝雀」。**社区发起的测量实践，非官方基准**；分数为 Arctic Shift 归档快照。
 
 ---
 
